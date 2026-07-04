@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.venv/
+# cache Overpass d'OSMnx
+cache/
+# artefact reproductible du pipeline
+data/graph.pkl

@@ -1,0 +1,560 @@
+/* ————————————————————————————————————————————————————————————————
+   Calmap — design calme pour public autiste.
+   Règles tenues partout : une seule couleur d'accent (#2A9D8F),
+   AUCUNE animation ni transition, texte ≥ 16 px, cibles ≥ 44 px,
+   contrastes AA (le texte accentué utilise --accent-texte, plus foncé).
+   ———————————————————————————————————————————————————————————————— */
+
+:root {
+  --fond: #fafaf9;
+  --surface: #ffffff;
+  --encre: #1f2933;        /* texte principal — 14,1:1 sur fond */
+  --encre-2: #52606d;      /* texte secondaire — 6,2:1 sur fond */
+  --accent: #2a9d8f;       /* remplissages, tracés, curseurs (jamais du texte) */
+  --accent-texte: #1d7a6e; /* accent pour texte et focus — 5,0:1 sur fond */
+  --bord: #e3e8e5;
+  --erreur-texte: #8a3b26; /* terre cuite sombre, posé — 7:1 sur blanc */
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 17px;
+  line-height: 1.5;
+  color: var(--encre);
+  background: var(--fond);
+  -webkit-tap-highlight-color: rgba(42, 157, 143, 0.15);
+}
+
+button,
+input,
+output {
+  font: inherit;
+  color: inherit;
+}
+
+h1 {
+  font-size: 22px;
+  margin: 0 0 4px;
+}
+
+h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent-texte);
+  outline-offset: 2px;
+}
+
+/* ——— Structure générale ——— */
+
+.app {
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--fond);
+}
+
+.contenu {
+  flex: 1;
+  min-height: 0;
+}
+
+.onglet {
+  display: none;
+  height: 100%;
+}
+
+.onglet.actif {
+  display: block;
+}
+
+.bandeau-demo {
+  margin: 0;
+  padding: 6px 12px;
+  text-align: center;
+  font-size: 16px;
+  color: #5c4d24;
+  background: #f6f1e7;
+  border-bottom: 1px solid #ece4d2;
+}
+
+.garde-fou {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  padding: 24px;
+  text-align: center;
+}
+
+/* ——— Barre d'onglets ——— */
+
+.barre-onglets {
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--bord);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.barre-onglets button {
+  flex: 1;
+  min-height: 68px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: none;
+  background: none;
+  color: var(--encre-2);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.barre-onglets button[aria-current="page"] {
+  color: var(--accent-texte);
+  font-weight: 600;
+  box-shadow: inset 0 3px 0 var(--accent);
+}
+
+/* ——— Boutons ——— */
+
+.bouton {
+  min-height: 48px;
+  padding: 0 18px;
+  border-radius: 12px;
+  border: 1.5px solid #c9d2ce;
+  background: var(--surface);
+  color: var(--encre);
+  font-size: 17px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.bouton-plein {
+  background: var(--accent-texte);
+  border-color: var(--accent-texte);
+  color: #ffffff;
+}
+
+.rang-boutons {
+  display: flex;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+/* ——— Curseurs (heure, profil) ——— */
+
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 44px; /* cible tactile */
+  margin: 0;
+  background: transparent;
+}
+
+input[type="range"]::-webkit-slider-runnable-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #dde3e0;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 28px;
+  height: 28px;
+  margin-top: -11px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(31, 41, 51, 0.25);
+}
+
+input[type="range"]::-moz-range-track {
+  height: 6px;
+  border-radius: 3px;
+  background: #dde3e0;
+}
+
+input[type="range"]::-moz-range-thumb {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 3px solid #ffffff;
+}
+
+.curseur-heure {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.curseur-heure label {
+  font-weight: 600;
+}
+
+.curseur-heure input {
+  flex: 1;
+}
+
+.curseur-heure output {
+  min-width: 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* ——— Onglet Carte ——— */
+
+.carte-onglet {
+  height: 100%;
+  display: flex;
+}
+
+.zone-carte {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+}
+
+.carte-pleine {
+  height: 100%;
+  width: 100%;
+}
+
+.leaflet-container {
+  font-family: inherit;
+  background: #eceeeb;
+}
+
+.outils-carte {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 10px;
+  z-index: 1000;
+  background: var(--surface);
+  border: 1px solid var(--bord);
+  border-radius: 14px;
+  padding: 8px 14px 12px;
+  box-shadow: 0 1px 6px rgba(31, 41, 51, 0.12);
+}
+
+.indice,
+.texte-discret {
+  margin: 8px 0 0;
+  font-size: 16px;
+  color: var(--encre-2);
+}
+
+.texte-erreur {
+  margin: 8px 0 0;
+  font-size: 16px;
+  color: var(--erreur-texte);
+}
+
+.legende-heatmap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  font-size: 16px;
+  color: var(--encre-2);
+}
+
+.legende-heatmap .degrade {
+  flex: 0 0 72px;
+  height: 10px;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #2a9d8f, #e9c46a, #e76f51);
+}
+
+/* ——— Bottom sheet comparatif ——— */
+
+.feuille {
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1000;
+  background: var(--surface);
+  border: 1px solid var(--bord);
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 2px 12px rgba(31, 41, 51, 0.18);
+}
+
+.feuille-titre {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.badge {
+  padding: 2px 12px;
+  border-radius: 999px;
+  background: #eef2f0;
+  color: #3e4c59;
+  font-size: 16px;
+  white-space: nowrap;
+}
+
+.feuille-deltas {
+  margin: 8px 0;
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.legende-routes {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-size: 16px;
+  color: var(--encre-2);
+}
+
+.cle-trace {
+  display: inline-block;
+  width: 28px;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.cle-calme {
+  border-top: 6px solid var(--accent);
+  border-radius: 3px;
+}
+
+.cle-rapide {
+  border-top: 3px dashed #5b6770;
+}
+
+/* ——— Onglets Quand y aller & Mon profil ——— */
+
+.quand-onglet,
+.profil-onglet {
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px 16px 24px;
+}
+
+.consigne {
+  margin: 0 0 12px;
+  color: var(--encre-2);
+}
+
+.mini-carte {
+  height: 260px;
+  border-radius: 14px;
+  overflow: hidden;
+  border: 1px solid var(--bord);
+}
+
+.message-calme {
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: #f1f4f3;
+  border: 1px solid var(--bord);
+  border-radius: 12px;
+}
+
+/* ——— Histogramme « quand y aller » ——— */
+
+.bloc-histogramme {
+  margin-top: 16px;
+  background: var(--surface);
+  border: 1px solid var(--bord);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.creneau-conseille {
+  margin: 0 0 12px;
+}
+
+.creneau-conseille strong {
+  color: var(--accent-texte);
+}
+
+.histogramme {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 2px;
+  align-items: end;
+  height: 180px;
+  border-bottom: 1px solid var(--bord);
+}
+
+.barre {
+  background: #b9c6c2;
+  border-radius: 3px 3px 0 0; /* extrémité arrondie, base carrée */
+}
+
+.barre.optimale {
+  background: var(--accent);
+}
+
+.barre.passee {
+  background: #e2e7e5;
+}
+
+.axe-heures {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 2px;
+  margin-top: 6px;
+}
+
+.axe-heures span {
+  font-size: 16px;
+  color: var(--encre-2);
+  white-space: nowrap;
+}
+
+.note-lecture {
+  margin: 10px 0 0;
+  font-size: 16px;
+  color: var(--encre-2);
+}
+
+.details-valeurs summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--accent-texte);
+  font-weight: 600;
+}
+
+.details-valeurs table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 16px;
+}
+
+.details-valeurs th,
+.details-valeurs td {
+  text-align: left;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--bord);
+}
+
+.details-valeurs td:first-child {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ——— Onglet Mon profil ——— */
+
+.carte-reglage {
+  margin-top: 12px;
+  background: var(--surface);
+  border: 1px solid var(--bord);
+  border-radius: 14px;
+  padding: 16px;
+}
+
+.rang-libelle {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.rang-libelle label {
+  font-weight: 600;
+}
+
+.rang-libelle output {
+  color: var(--encre-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.valeur-effective {
+  margin: 4px 0 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--accent-texte);
+}
+
+.rang-bascule {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+}
+
+.rang-bascule label {
+  font-weight: 600;
+}
+
+.description-bascule {
+  margin: 2px 0 0;
+  font-size: 16px;
+  color: var(--encre-2);
+}
+
+input[type="checkbox"][role="switch"] {
+  -webkit-appearance: none;
+  appearance: none;
+  flex-shrink: 0;
+  width: 68px;
+  height: 44px; /* cible tactile */
+  margin: 0;
+  border: none;
+  border-radius: 22px;
+  background: #c4cdc9;
+  position: relative;
+  cursor: pointer;
+}
+
+input[type="checkbox"][role="switch"]::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgba(31, 41, 51, 0.25);
+}
+
+input[type="checkbox"][role="switch"]:checked {
+  background: var(--accent-texte);
+}
+
+input[type="checkbox"][role="switch"]:checked::after {
+  left: auto;
+  right: 4px;
+}
+
+.note-vie-privee {
+  margin: 20px 0 0;
+  padding: 14px 16px;
+  background: #edf4f2;
+  border-radius: 12px;
+}
