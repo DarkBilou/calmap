@@ -1,2 +1,4 @@
 node_modules/
-dist/
+# dist/ est COMMITÉ volontairement pour le déploiement : l'hébergeur (Render)
+# n'a pas Node.js dans son environnement Python natif. Avant de déployer un
+# changement frontend : `npm run build` puis committer frontend/dist à jour.

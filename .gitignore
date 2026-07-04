@@ -3,5 +3,6 @@ __pycache__/
 .venv/
 # cache Overpass d'OSMnx
 cache/
-# artefact reproductible du pipeline
-data/graph.pkl
+# data/graph.pkl est COMMITÉ volontairement (voir data/README.md) : petit
+# fichier (~500 Ko) nécessaire au déploiement, l'hébergeur n'appelant pas
+# l'API Overpass au build. Régénérable via pipeline/build_graph.py.

@@ -2,13 +2,18 @@
 
 Contenu généré et données optionnelles du pipeline Calmap.
 
-## `graph.pkl` (généré)
+## `graph.pkl` (généré, mais commité)
 
-Graphe piéton enrichi (MultiDiGraph NetworkX picklé), produit par :
+Graphe piéton enrichi (MultiDiGraph NetworkX picklé) de la zone de démo,
+produit par :
 
 ```bash
 python pipeline/build_graph.py
 ```
+
+Committé dans le dépôt (~500 Ko) pour que le déploiement en ligne n'ait pas
+besoin d'appeler l'API Overpass au démarrage. Si tu changes la zone de démo ou
+les données de bruit, relance le pipeline puis recommite le nouveau fichier.
 
 Chaque arête porte : `length`, `lden`, `bruit_origine` (`reel`/`synthetique`),
 `n_bar`, `n_marche`, `n_ecole`, `n_commerce`.

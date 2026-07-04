@@ -92,3 +92,35 @@ Notes :
 - Si `frontend/dist/` existe, il est servi sur `/` (sinon ignoré silencieusement).
 - Si `data/graph.pkl` manque au démarrage, le serveur s'arrête avec un message
   indiquant de lancer `python pipeline/build_graph.py`.
+
+## Déploiement en ligne (Render, gratuit)
+
+`frontend/dist/` et `data/graph.pkl` sont commités dans le dépôt : l'hébergeur
+n'a besoin que de Python (pas de Node), donc le déploiement se résume à
+installer `requirements.txt` et lancer `uvicorn`. Le fichier [render.yaml](render.yaml)
+décrit tout ça.
+
+1. Le dépôt GitHub doit être **public** (Settings → tout en bas → Danger Zone
+   → Change visibility → Make public).
+2. Créer un compte sur [render.com](https://render.com) (gratuit, email suffit).
+3. **New +** → **Blueprint** → connecter ce dépôt GitHub → Render détecte
+   `render.yaml` et propose le service `calmap` → **Apply**.
+4. Premier déploiement : quelques minutes. L'URL finale ressemble à
+   `https://calmap-xxxx.onrender.com`.
+
+> Sur le plan gratuit, le service se met en veille après 15 min d'inactivité :
+> la première requête qui le réveille prend ~30-50 secondes, les suivantes
+> sont normales. Ce n'est pas un bug.
+
+**Avant de redéployer un changement du frontend**, il faut reconstruire et
+recommiter `frontend/dist` (l'hébergeur ne le fait pas à ta place) :
+
+```bash
+cd frontend && npm run build && cd ..
+git add frontend/dist data/graph.pkl
+git commit -m "Rebuild frontend pour déploiement"
+git push
+```
+
+Render redéploie automatiquement à chaque push sur la branche configurée
+(`ajout-frontend` dans `render.yaml` — à changer si tu fusionnes vers `main`).
