@@ -1,0 +1,13 @@
+# Backend Calmap — Python 3.11+
+fastapi>=0.110
+uvicorn[standard]>=0.29
+osmnx>=2.0,<3
+geopandas>=0.14
+networkx>=3.2
+numpy>=1.26
+pandas>=2.0
+shapely>=2.0
+# requis par ox.distance.nearest_nodes sur un graphe non projeté (lat/lon)
+scikit-learn>=1.3
+# uniquement pour backend/test_api.py
+requests>=2.31
