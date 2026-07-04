@@ -248,6 +248,16 @@ input[type="range"]::-moz-range-thumb {
   background: #eceeeb;
 }
 
+/* iOS (surtout en PWA installée plein écran) ne synthétise le « click » que
+   sur les éléments jugés cliquables : sans ceci, les taps sur la carte ne
+   posent pas de points. Limité au tactile pour garder la main « grab » au
+   pointeur souris. */
+@media (pointer: coarse) {
+  .leaflet-container {
+    cursor: pointer;
+  }
+}
+
 .outils-carte {
   position: absolute;
   top: 10px;
