@@ -1,0 +1,135 @@
+import { useEffect, useState } from "react";
+import { MapContainer, CircleMarker } from "react-leaflet";
+import { appelApi } from "../api";
+import { useProfil, poidsApi } from "../profil";
+import { ACCENT, CENTRE_DEMO, LIMITES_DEMO, ZOOM_DEMO } from "../config";
+import { CentrerSurPoint, ClicsCarte, FondDeCarte, LimiterDezoomCarte, RafraichirTaille } from "../carte-utils";
+import AdresseSearch from "../components/AdresseSearch";
+import Histogramme from "../components/Histogramme";
+import MessageCalme from "../components/MessageCalme";
+
+const TEXTE_LIEU_CARTE = "Lieu choisi sur la carte";
+
+export default function QuandTab({ actif }) {
+  const { profil } = useProfil();
+  const { poids_bruit, poids_foule } = poidsApi(profil);
+
+  const [destination, setDestination] = useState(null);
+  const [texteLieu, setTexteLieu] = useState("");
+  const [pointRecentre, setPointRecentre] = useState(null);
+  const [donnees, setDonnees] = useState(null);
+  const [analyseEnCours, setAnalyseEnCours] = useState(false);
+  const [erreur, setErreur] = useState("");
+
+  useEffect(() => {
+    if (!destination) return undefined;
+    let annule = false;
+    setAnalyseEnCours(true);
+    appelApi("/api/quand", {
+      lat: destination.lat.toFixed(6),
+      lon: destination.lng.toFixed(6),
+      poids_bruit,
+      poids_foule,
+    })
+      .then((reponse) => {
+        if (annule) return;
+        setDonnees(reponse);
+        setErreur("");
+      })
+      .catch((e) => {
+        if (annule) return;
+        setDonnees(null);
+        setErreur(e.message);
+      })
+      .finally(() => {
+        if (!annule) setAnalyseEnCours(false);
+      });
+    return () => {
+      annule = true;
+    };
+  }, [destination, poids_bruit, poids_foule]);
+
+  function choisirSurCarte(latlng) {
+    setDestination(latlng);
+    setTexteLieu(TEXTE_LIEU_CARTE);
+    setErreur("");
+  }
+
+  function changerTexteLieu(valeur) {
+    setTexteLieu(valeur);
+    if (valeur.trim() === "") {
+      setDestination(null);
+      setPointRecentre(null);
+      setDonnees(null);
+      setErreur("");
+    }
+  }
+
+  function choisirLieu(suggestion) {
+    const point = { lat: suggestion.lat, lng: suggestion.lng };
+    setDestination(point);
+    setPointRecentre(point);
+    setTexteLieu(suggestion.label);
+    setErreur("");
+  }
+
+  return (
+    <div className="quand-onglet">
+      <h1>Quand y aller</h1>
+      <p className="consigne">Recherche un lieu ou touche la carte.</p>
+
+      <div className="recherche-quand">
+        <AdresseSearch
+          label="Lieu à analyser"
+          value={texteLieu}
+          onChange={changerTexteLieu}
+          onChoisir={choisirLieu}
+          placeholder="Rue, lieu, adresse..."
+          rechercheDesactivee={texteLieu === TEXTE_LIEU_CARTE}
+        />
+      </div>
+
+      <div className="mini-carte">
+        <MapContainer
+          center={CENTRE_DEMO}
+          zoom={ZOOM_DEMO}
+          minZoom={11}
+          maxBounds={LIMITES_DEMO}
+          maxBoundsViscosity={1.0}
+          zoomControl={false}
+          className="carte-pleine"
+        >
+          <FondDeCarte />
+          <RafraichirTaille actif={actif} />
+          <LimiterDezoomCarte actif={actif} limites={LIMITES_DEMO} />
+          <CentrerSurPoint point={pointRecentre} />
+          <ClicsCarte onClic={choisirSurCarte} />
+          {destination && (
+            <CircleMarker
+              center={destination}
+              radius={9}
+              pathOptions={{ color: "#1F2933", weight: 2, fillColor: ACCENT, fillOpacity: 1 }}
+            />
+          )}
+        </MapContainer>
+      </div>
+
+      {!destination && !erreur && (
+        <MessageCalme>
+          Choisis un lieu par recherche ou sur la carte. Tu verras les heures les plus calmes pour y aller,
+          selon ton profil.
+        </MessageCalme>
+      )}
+      {analyseEnCours && <p className="texte-discret" role="status">Analyse du quartier…</p>}
+      {erreur && <MessageCalme>{erreur}</MessageCalme>}
+
+      {donnees && !analyseEnCours && (
+        <Histogramme
+          scores={donnees.scores_horaires}
+          creneau={donnees.creneau_optimal}
+          heureActuelle={new Date().getHours()}
+        />
+      )}
+    </div>
+  );
+}
