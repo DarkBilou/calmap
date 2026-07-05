@@ -11,7 +11,8 @@ Depot GitHub :
 
 La version finale du projet est disponible sur la branche branch_v4.
 Il faut donc recuperer cette branche, et non une autre branche du depot.
-
+Il est préferable d'ouvrir le site avec une extension simulateur mobile car le design est adapté a l'écran d'un téléphone
+Lien d'une extension : webmobilefirst.com
 
 1. RECUPERER LA VERSION FINALE
 ------------------------------
