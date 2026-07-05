@@ -1,17 +1,51 @@
-CALMAP - COMMENT LANCER LE SITE
-================================
+CALMAP - VERSION FINALE ET LANCEMENT DU SITE
+============================================
 
-Emplacement du projet :
-C:\Users\bilel\Documents\Bilel\demo_calmap
+Version finale a evaluer :
 
-Prerequis :
-- Python 3.11 ou plus
-- Node.js 18 ou plus, avec npm
-- PowerShell ou Invite de commandes Windows
+  branch_v4
+
+Depot GitHub :
+
+  https://github.com/calmap-team/calmap.git
+
+La version finale du projet est disponible sur la branche branch_v4.
+Il faut donc recuperer cette branche, et non une autre branche du depot.
 
 
-METHODE RECOMMANDEE
--------------------
+1. RECUPERER LA VERSION FINALE
+------------------------------
+
+Depuis un dossier de travail au choix, lancer :
+
+  git clone --branch branch_v4 --single-branch https://github.com/calmap-team/calmap.git calmap-branch-v4
+
+Puis entrer dans le dossier du projet :
+
+  cd calmap-branch-v4
+
+Pour verifier que la bonne branche est utilisee :
+
+  git branch
+
+La branche active doit etre :
+
+  branch_v4
+
+
+2. PREREQUIS
+------------
+
+Avant de lancer le site, verifier que la machine dispose de :
+
+- Python 3.11 ou plus ;
+- Node.js 18 ou plus, avec npm ;
+- Git ;
+- PowerShell ou Invite de commandes Windows.
+
+
+3. LANCEMENT RECOMMANDE
+-----------------------
 
 Depuis la racine du projet, lancer :
 
@@ -25,7 +59,7 @@ Ce script :
 - construit le frontend ;
 - lance le serveur web.
 
-Une fois le serveur lance, ouvrir :
+Une fois le serveur lance, ouvrir dans un navigateur :
 
   http://127.0.0.1:8000/
 
@@ -33,8 +67,8 @@ Il faut garder le terminal ouvert pendant la demonstration.
 Pour arreter le site, faire Ctrl+C dans le terminal.
 
 
-METHODE RAPIDE SI LES DEPENDANCES SONT DEJA INSTALLEES
-------------------------------------------------------
+4. LANCEMENT RAPIDE SI LES DEPENDANCES SONT DEJA INSTALLEES
+-----------------------------------------------------------
 
 Depuis la racine du projet :
 
@@ -44,8 +78,8 @@ Cette commande evite de reinstaller les dependances et lance directement
 la construction du frontend puis le serveur.
 
 
-METHODE DEVELOPPEMENT EN DEUX TERMINAUX
----------------------------------------
+5. LANCEMENT EN MODE DEVELOPPEMENT
+----------------------------------
 
 Terminal 1 - Backend FastAPI :
 
@@ -68,15 +102,19 @@ Le backend reste disponible sur :
   http://localhost:8000/
 
 
-NOTES
------
+6. NOTES IMPORTANTES
+--------------------
 
-- Le fichier data\graph.pkl est deja present dans ce dossier.
-- Si ce fichier manque, lancer :
+- Le fichier data\graph.pkl est fourni avec la version finale.
+- Si ce fichier manque, lancer depuis la racine :
 
   python pipeline\build_graph.py
 
 - La documentation technique de l'API est disponible quand le backend tourne :
 
   http://localhost:8000/docs
+
+- Si la commande uvicorn n'est pas reconnue sous Windows, utiliser :
+
+  python -m uvicorn backend.main:app --reload --port 8000
 
