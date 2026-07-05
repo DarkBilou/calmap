@@ -41,7 +41,8 @@ Avant de lancer le site, verifier que la machine dispose de :
 - Python 3.11 ou plus ;
 - Node.js 18 ou plus, avec npm ;
 - Git ;
-- PowerShell ou Invite de commandes Windows.
+- PowerShell ou Invite de commandes Windows ;
+- Terminal sur macOS.
 
 
 3. LANCEMENT RECOMMANDE
@@ -78,7 +79,33 @@ Cette commande evite de reinstaller les dependances et lance directement
 la construction du frontend puis le serveur.
 
 
-5. LANCEMENT EN MODE DEVELOPPEMENT
+5. LANCEMENT SUR MACOS
+----------------------
+
+Sur macOS, ouvrir l'application Terminal, se placer dans la racine du projet,
+puis lancer les commandes suivantes :
+
+  python3 -m pip install -r requirements.txt
+  cd frontend
+  npm install
+  npm run build
+  cd ..
+  python3 -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+
+Quand le serveur affiche qu'il est lance, ouvrir le site avec :
+
+  open http://127.0.0.1:8000/
+
+Il faut garder le terminal ouvert pendant la demonstration.
+Pour arreter le site, faire Ctrl+C dans le terminal.
+
+Si la commande python3 ne fonctionne pas, verifier l'installation de Python
+ou essayer :
+
+  python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000
+
+
+6. LANCEMENT EN MODE DEVELOPPEMENT
 ----------------------------------
 
 Terminal 1 - Backend FastAPI :
@@ -102,7 +129,7 @@ Le backend reste disponible sur :
   http://localhost:8000/
 
 
-6. NOTES IMPORTANTES
+7. NOTES IMPORTANTES
 --------------------
 
 - Le fichier data\graph.pkl est fourni avec la version finale.
@@ -117,4 +144,3 @@ Le backend reste disponible sur :
 - Si la commande uvicorn n'est pas reconnue sous Windows, utiliser :
 
   python -m uvicorn backend.main:app --reload --port 8000
-
