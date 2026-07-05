@@ -169,8 +169,17 @@ h2 {
   opacity: 1;
 }
 
-.bouton-rechercher {
+.bouton-rechercher,
+.bouton-lancer,
+.bouton-quitter {
   flex: 1;
+}
+
+/* Quitter l'itinéraire en cours : terre cuite sombre (rouge posé, AA) */
+.bouton-quitter {
+  background: var(--erreur-texte);
+  border-color: var(--erreur-texte);
+  color: #ffffff;
 }
 
 .rang-boutons {

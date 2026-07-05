@@ -42,10 +42,18 @@ invalides ou point hors zone. Le serveur ne crashe jamais.
 ## Frontend — 3 onglets
 
 1. **Carte** : heatmap (`/api/heatmap`) recolorée selon curseur horaire 0-23 h ;
-   mode itinéraire à 2 taps → `/api/route` → tracé rapide (gris pointillé) +
-   calme (vert épais) + bottom sheet comparatif (Δ durée, Δ exposition, badge fiabilité).
+   géolocalisation au lancement (`geolocalisation.js`, HTTPS/localhost requis) :
+   si position dans la zone → départ « Votre position », vue recentrée, chaque
+   tap règle l'arrivée (bouton « Partir de ma position » pour y revenir) ;
+   hors zone/refus → repli : 2 taps départ/arrivée. → `/api/route` → tracé
+   rapide (gris pointillé) + calme (vert épais) + bottom sheet comparatif
+   (Δ durée, Δ exposition, badge fiabilité), bouton Rechercher (replie le menu,
+   zoome sur le départ). Depuis la fiche : « Lancer le calme/rapide » → seul le
+   tracé choisi reste, fiche en mode suivi, bouton « Quitter » (terre cuite
+   `--erreur-texte`) pour revenir au choix.
 2. **Quand y aller** : mini-carte avec heatmap d'ambiance (heure actuelle, via
-   `CoucheHeatmapAuto`, erreurs silencieuses) ; tap → `/api/quand` → histogramme 24 barres
+   `CoucheHeatmapAuto`, erreurs silencieuses), centrée sur la position si
+   disponible (marqueur « tu es ici ») ; tap → `/api/quand` → histogramme 24 barres
    fait main (divs CSS, pas de lib de charts), créneau optimal surligné (même
    s'il est passé), heures passées grisées, valeurs exactes dans un `<details>`.
 3. **Mon profil** : curseurs Bruit (défaut 70) / Foule (défaut 50), bascule

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { MapContainer, CircleMarker } from "react-leaflet";
 import { appelApi } from "../api";
+import { useGeolocalisation } from "../geolocalisation";
 import { useProfil, poidsApi } from "../profil";
 import { ACCENT, CENTRE_DEMO, LIMITES_DEMO, ZOOM_DEMO } from "../config";
 import {
@@ -20,6 +21,7 @@ const TEXTE_LIEU_CARTE = "Lieu choisi sur la carte";
 export default function QuandTab({ actif }) {
   const { profil } = useProfil();
   const { poids_bruit, poids_foule } = poidsApi(profil);
+  const { statut: statutPosition, position: maPosition } = useGeolocalisation();
 
   const [heureActuelle] = useState(() => new Date().getHours());
   const [destination, setDestination] = useState(null);
@@ -30,6 +32,14 @@ export default function QuandTab({ actif }) {
   const [donnees, setDonnees] = useState(null);
   const [analyseEnCours, setAnalyseEnCours] = useState(false);
   const [erreur, setErreur] = useState("");
+
+  // Position reçue : la mini-carte se centre dessus, tant que l'utilisateur
+  // n'a pas encore choisi de lieu à analyser.
+  useEffect(() => {
+    if (statutPosition !== "ok" || destination || texteLieu !== "") return;
+    setPointRecentre({ lat: maPosition.lat, lng: maPosition.lng });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statutPosition]);
 
   useEffect(() => {
     if (!destination) return undefined;
@@ -139,6 +149,13 @@ export default function QuandTab({ actif }) {
               center={destination}
               radius={9}
               pathOptions={{ color: "#1F2933", weight: 2, fillColor: ACCENT, fillOpacity: 1 }}
+            />
+          )}
+          {maPosition && (
+            <CircleMarker
+              center={maPosition}
+              radius={7}
+              pathOptions={{ color: "#FFFFFF", weight: 3, fillColor: ACCENT, fillOpacity: 1 }}
             />
           )}
         </MapContainer>
