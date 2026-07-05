@@ -41,30 +41,47 @@ PROFIL_MARCHE = np.array([0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.10, 0.40, 0.70, 
 PROFIL_ECOLE = np.array([0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.20, 1.00, 0.10, 0.00, 0.00,
                          0.00, 0.00, 0.00, 0.00, 0.50, 0.50, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00])
 
-# Commerces : plateau 10 h - 19 h (pic du samedi après-midi : cf. jour_semaine, ignoré pour l'instant)
+# Commerces : plateau 10 h - 19 h (le samedi est modulé par FACTEUR_COMMERCE_SEMAINE)
 PROFIL_COMMERCE = np.array([0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.00, 0.10, 0.30, 0.80, 0.85,
                             0.90, 0.85, 0.85, 0.85, 0.85, 0.90, 0.90, 0.80, 0.30, 0.10, 0.00, 0.00])
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Facteurs hebdomadaires : 7 valeurs, index = jour (0 = lundi … 6 = dimanche).
+# Heuristiques parisiennes plausibles, même esprit que les profils horaires.
+# Les valeurs > 1 restent sans risque : les composantes sont bornées ensuite.
+# ─────────────────────────────────────────────────────────────────────────────
+
+#                                   lun   mar   mer   jeu   ven   sam   dim
+FACTEUR_TRAFIC_SEMAINE = np.array([1.00, 1.00, 1.00, 1.00, 1.00, 0.85, 0.70])
+FACTEUR_BAR_SEMAINE = np.array([0.80, 0.80, 0.90, 1.00, 1.15, 1.20, 0.90])
+FACTEUR_MARCHE_SEMAINE = np.array([0.50, 0.50, 0.50, 0.50, 0.60, 1.00, 1.00])
+FACTEUR_ECOLE_SEMAINE = np.array([1.00, 1.00, 0.60, 1.00, 1.00, 0.00, 0.00])
+FACTEUR_COMMERCE_SEMAINE = np.array([0.90, 0.90, 0.90, 0.90, 1.00, 1.30, 0.35])
 
 
 def s_bruit(lden: float | np.ndarray, heure: int,
             jour_semaine: int = 0) -> float | np.ndarray:
-    """Composante bruit : Lden normalisé (45 → 75 dB) modulé par le trafic horaire."""
+    """Composante bruit : Lden normalisé (45 → 75 dB) modulé par le trafic
+    horaire et le jour de la semaine (week-end plus calme)."""
     return np.clip((np.asarray(lden, dtype=float) - 45.0) / 30.0, 0.0, 1.0) \
-        * float(PROFIL_TRAFIC[heure])
+        * float(PROFIL_TRAFIC[heure]) * float(FACTEUR_TRAFIC_SEMAINE[jour_semaine])
 
 
 def s_foule(n_bar: float | np.ndarray, n_marche: float | np.ndarray,
             n_ecole: float | np.ndarray, n_commerce: float | np.ndarray,
             heure: int, jour_semaine: int = 0) -> float | np.ndarray:
-    """Composante foule : POI proches pondérés par leur profil horaire d'activité.
-
-    jour_semaine (0 = lundi … 6 = dimanche) permettra de moduler les commerces
-    le samedi après-midi ; ignoré pour l'instant.
-    """
-    charge = (np.asarray(n_bar, dtype=float) * PROFIL_BAR[heure]
-              + np.asarray(n_marche, dtype=float) * PROFIL_MARCHE[heure]
-              + np.asarray(n_ecole, dtype=float) * PROFIL_ECOLE[heure]
-              + np.asarray(n_commerce, dtype=float) * PROFIL_COMMERCE[heure]) / 5.0
+    """Composante foule : POI proches pondérés par leur profil horaire
+    d'activité et le jour de la semaine (0 = lundi … 6 = dimanche) — marchés
+    et commerces du week-end, écoles fermées samedi/dimanche…"""
+    j = jour_semaine
+    charge = (np.asarray(n_bar, dtype=float)
+              * PROFIL_BAR[heure] * FACTEUR_BAR_SEMAINE[j]
+              + np.asarray(n_marche, dtype=float)
+              * PROFIL_MARCHE[heure] * FACTEUR_MARCHE_SEMAINE[j]
+              + np.asarray(n_ecole, dtype=float)
+              * PROFIL_ECOLE[heure] * FACTEUR_ECOLE_SEMAINE[j]
+              + np.asarray(n_commerce, dtype=float)
+              * PROFIL_COMMERCE[heure] * FACTEUR_COMMERCE_SEMAINE[j]) / 5.0
     return np.clip(charge, 0.0, 1.0)
 
 

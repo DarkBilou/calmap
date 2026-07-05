@@ -3,5 +3,7 @@ __pycache__/
 .venv/
 # cache Overpass d'OSMnx
 cache/
-# artefact reproductible du pipeline
+# artefacts reproductibles : pipeline + cache compilé au premier démarrage
 data/graph.pkl
+data/graph_compile.npz
+data/*.tmp.npz

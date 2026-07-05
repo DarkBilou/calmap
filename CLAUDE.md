@@ -8,10 +8,15 @@ Paris + Issy-les-Moulineaux. Aucune base de données, aucun compte utilisateur.
 
 ```
 pipeline/build_graph.py   # offline : graphe piéton OSMnx + POI + bruit → data/graph.pkl (~1-2 min)
-backend/                  # FastAPI (Python) — graphe chargé 1 fois au démarrage, pré-compilé en numpy
+backend/                  # FastAPI (Python) — sert tout depuis des tableaux numpy compilés
 frontend/                 # PWA React 18 + Vite (JavaScript) + Leaflet/react-leaflet, CSS pur
 data/graph.pkl            # généré ; bruit Bruitparif réel si data/bruit_lden.geojson présent, sinon synthétique
+data/graph_compile.npz    # cache compilé au 1er démarrage (~23 Mo, ~3 min) ; ensuite démarrage en ~5 s
 ```
+
+Le pickle networkx n'est lu qu'une fois : le backend compile arêtes, géométries
+et structures de routage en tableaux numpy (`graph_compile.npz`, régénéré si
+`graph.pkl` est plus récent) et les requêtes n'utilisent que ces tableaux.
 
 - **Backend** : `uvicorn backend.main:app --port 8000`. Sert aussi `frontend/dist`
   sur `/` s'il existe. Tests de fumée : `python backend/test_api.py` (serveur lancé).
@@ -20,7 +25,11 @@ data/graph.pkl            # généré ; bruit Bruitparif réel si data/bruit_lde
   (adb reverse, PWA) : `frontend/README.md`.
 - Score sensoriel `S(e, h, profil) ∈ [0,1]` (backend/scoring.py) : bruit Lden
   normalisé × profil horaire de trafic + POI (bars, marchés, écoles, commerces)
-  × leurs profils horaires. Itinéraire calme : coût `length × (1 + β·S)`, β = 3 par défaut.
+  × leurs profils horaires, le tout modulé par des facteurs hebdomadaires
+  (`FACTEUR_*_SEMAINE`, 0 = lundi … 6 = dimanche : trafic réduit le week-end,
+  marchés le week-end, écoles fermées sam./dim., commerces au pic le samedi).
+  Itinéraire calme : coût `length × (1 + β·S)` — β = 3 de base, amplifié par
+  l'état du moment côté frontend (`betaApi` : ×1,15/1,25/1,4 → jusqu'à 4,2).
 
 ## Contrat d'API (FIGÉ — le frontend en dépend, ne pas le changer)
 
@@ -30,9 +39,9 @@ invalides ou point hors zone. Le serveur ne crashe jamais.
 | Endpoint | Paramètres | Réponse |
 |---|---|---|
 | `GET /api/health` | — | `{status, graph_loaded, edges, bruit_source: "reel"\|"synthetique"}` |
-| `GET /api/heatmap` | `heure` 0-23, `poids_bruit` 0-1, `poids_foule` 0-1, `sud/nord/ouest/est` optionnels | FeatureCollection, `properties: {score, lden}` ; rues (LineString) sur toute la zone ; au-delà de 20 000 tronçons visibles (vue large), « nuages » agrégés par quartier (Point + `nuage: true`, `demi_lat`/`demi_lon`) rendus côté client en une image floutée transparente (fondu continu) ; réponses gzippées ; scores caches par heure/profil |
-| `GET /api/route` | `from_lat/lon`, `to_lat/lon`, `heure`, `poids_bruit`, `poids_foule`, `beta` | `{rapide: {geojson, distance_m, duree_min, exposition}, calme: {idem + delta_duree_min, delta_exposition_pct}, confiance}` |
-| `GET /api/quand` | `lat`, `lon`, `poids_bruit`, `poids_foule` | `{scores_horaires: [{heure, score}×24], creneau_optimal: {debut, fin}}` (rues < 150 m, créneau 2 h entre 8 h et 21 h) |
+| `GET /api/heatmap` | `heure` 0-23, `poids_bruit` 0-1, `poids_foule` 0-1, `sud/nord/ouest/est` optionnels, `jour` 0-6 optionnel (défaut : aujourd'hui) | FeatureCollection, `properties: {score, lden}` ; rues (LineString) sur toute la zone ; au-delà de 20 000 tronçons visibles (vue large), « nuages » agrégés par quartier (Point + `nuage: true`, `demi_lat`/`demi_lon`) rendus côté client en une image floutée transparente (fondu continu) ; réponses gzippées ; scores caches par heure/jour/profil |
+| `GET /api/route` | `from_lat/lon`, `to_lat/lon`, `heure`, `poids_bruit`, `poids_foule`, `beta`, `jour` 0-6 optionnel | `{rapide: {geojson, distance_m, duree_min, exposition}, calme: {idem + delta_duree_min, delta_exposition_pct}, confiance}` |
+| `GET /api/quand` | `lat`, `lon`, `poids_bruit`, `poids_foule`, `jour` 0-6 optionnel | `{scores_horaires: [{heure, score}×24], creneau_optimal: {debut, fin}}` (rues < 150 m, créneau 2 h entre 8 h et 21 h) |
 | `GET /api/adresses` | `q` (≥ 3 caractères, sinon `[]`) | `[{id, label, lat, lng}]` — proxy Nominatim côté serveur (timeout 5 s, 503 si indisponible) ; le navigateur ne doit PAS appeler Nominatim en direct (blocages/limites de débit) |
 | `GET /api/adresse-inverse` | `lat`, `lon` (dans la zone, sinon 400) | `{label}` court (« 10 Rue X, Paris ») — proxy Nominatim reverse (timeout 5 s, 503 si indisponible) ; remplit les champs après un tap sur la carte |
 
@@ -41,21 +50,26 @@ invalides ou point hors zone. Le serveur ne crashe jamais.
 
 ## Frontend — 3 onglets
 
-1. **Carte** : heatmap (`/api/heatmap`) recolorée selon curseur horaire 0-23 h ;
-   géolocalisation au lancement (`geolocalisation.js`, HTTPS/localhost requis) :
-   si position dans la zone → départ « Votre position », vue recentrée, chaque
-   tap règle l'arrivée (bouton « Partir de ma position » pour y revenir) ;
-   hors zone/refus → repli : 2 taps départ/arrivée. → `/api/route` → tracé
-   rapide (gris pointillé) + calme (vert épais) + bottom sheet comparatif
-   (Δ durée, Δ exposition, badge fiabilité), bouton Rechercher (replie le menu,
-   zoome sur le départ). Depuis la fiche : « Lancer le calme/rapide » → seul le
-   tracé choisi reste, fiche en mode suivi, bouton « Quitter » (terre cuite
-   `--erreur-texte`) pour revenir au choix.
-2. **Quand y aller** : mini-carte avec heatmap d'ambiance (heure actuelle, via
-   `CoucheHeatmapAuto`, erreurs silencieuses), centrée sur la position si
-   disponible (marqueur « tu es ici ») ; tap → `/api/quand` → histogramme 24 barres
-   fait main (divs CSS, pas de lib de charts), créneau optimal surligné (même
-   s'il est passé), heures passées grisées, valeurs exactes dans un `<details>`.
+1. **Carte** : heatmap (`/api/heatmap`) recolorée selon curseur horaire 0-23 h
+   (heure rappelée dans l'en-tête quand le menu est replié) ; géolocalisation au
+   lancement (`geolocalisation.js`, HTTPS/localhost requis) : si position dans
+   la zone → départ « Votre position », vue recentrée, bouton flottant
+   « recentrer sur ma position » (`.bouton-position`). **Un tap sur la carte
+   règle toujours l'arrivée** — le départ vient de la position ou du champ de
+   recherche, jamais d'un tap ; hors zone/refus → saisir l'adresse de départ.
+   → `/api/route` (β modulé par l'état du moment) → tracé rapide (gris
+   pointillé) + calme (vert épais), vue cadrée automatiquement sur le trajet
+   entier entre la barre d'outils et la fiche (`CadrerSurTrajet`, mesure le DOM)
+   + bottom sheet comparatif (Δ durée, Δ exposition, croix « Effacer » qui
+   remet le départ sur la position). Depuis la fiche : « Lancer le
+   calme/rapide » → seul le tracé choisi reste, fiche en mode suivi, bouton
+   « Quitter » (terre cuite `--erreur-texte`) pour revenir au choix.
+2. **Quand y aller** : mini-carte avec heatmap d'ambiance (curseur « Heure
+   affichée », via `CoucheHeatmapAuto`, erreurs silencieuses), centrée sur la
+   position si disponible (marqueur « tu es ici ») ; tap → `/api/quand` →
+   histogramme 24 barres fait main (divs CSS, pas de lib de charts), créneau
+   optimal surligné (même s'il est passé), heures passées grisées, valeurs
+   exactes dans un `<details>`.
 3. **Mon profil** : curseurs Bruit (défaut 70) / Foule (défaut 50) avec phrase
    de niveau (4 paliers : ≤ 25/50/75/100) ; « Sons difficiles » (4 cases,
    stockage local seulement, pas encore de scoring) ; « État du moment »
@@ -87,8 +101,9 @@ secours, `/api` jamais mis en cache). Icônes régénérables : `node frontend/s
 
 ## Pièges connus
 
-- `data/graph.pkl` absent → le backend refuse de démarrer : lancer
-  `python pipeline/build_graph.py` d'abord.
+- `data/graph.pkl` ET `data/graph_compile.npz` absents → le backend refuse de
+  démarrer : lancer `python pipeline/build_graph.py` d'abord. Le premier
+  démarrage après un nouveau `graph.pkl` recompile le cache (~3 min).
 - Service worker et installation PWA exigent HTTPS ou `localhost` : sur
   téléphone, passer par `adb reverse tcp:8000 tcp:8000` (cf. frontend/README.md).
 - Coordonnées hors Paris + Issy-les-Moulineaux → 400 ; la carte est bornée (`maxBounds`) pour

@@ -62,3 +62,9 @@ export async function rechercherAdresses(texte, { signal } = {}) {
 function premiereMajuscule(texte) {
   return texte.charAt(0).toUpperCase() + texte.slice(1);
 }
+
+/** Jour de la semaine local au format de l'API (0 = lundi … 6 = dimanche) :
+    les marchés du dimanche ou le calme du week-end comptent dans le score. */
+export function jourSemaine() {
+  return (new Date().getDay() + 6) % 7; // getDay() : 0 = dimanche
+}

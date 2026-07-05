@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { MapContainer, CircleMarker } from "react-leaflet";
-import { appelApi } from "../api";
+import { appelApi, jourSemaine } from "../api";
 import { useGeolocalisation } from "../geolocalisation";
-import { useProfil, poidsApi } from "../profil";
+import { useProfil, poidsApi, betaApi } from "../profil";
 import { couleurScore } from "../couleurs";
 import { ACCENT, CENTRE_DEMO, LIMITES_DEMO, ZOOM_DEMO } from "../config";
 import {
@@ -60,6 +60,7 @@ function libelleConfiance(confiance) {
 export default function CarteTab({ actif }) {
   const { profil } = useProfil();
   const { poids_bruit, poids_foule } = poidsApi(profil);
+  const beta = betaApi(profil); // l'état du moment accepte plus de détour
   const { statut: statutPosition, position: maPosition } = useGeolocalisation();
 
   const [heure, setHeure] = useState(() => new Date().getHours());
@@ -101,8 +102,8 @@ export default function CarteTab({ actif }) {
     if (!bornesCarte || itineraireLance) return undefined;
     const controleur = new AbortController();
     const minuterie = setTimeout(() => {
-      appelApi("/api/heatmap", { heure, poids_bruit, poids_foule, ...bornesCarte },
-        { signal: controleur.signal })
+      appelApi("/api/heatmap", { heure, jour: jourSemaine(), poids_bruit,
+        poids_foule, ...bornesCarte }, { signal: controleur.signal })
         .then((donnees) => {
           if (controleur.signal.aborted) return;
           setHeatmap(donnees);
@@ -133,8 +134,10 @@ export default function CarteTab({ actif }) {
         to_lat: arrivee.lat.toFixed(6),
         to_lon: arrivee.lng.toFixed(6),
         heure,
+        jour: jourSemaine(),
         poids_bruit,
         poids_foule,
+        beta,
       }, { signal: controleur.signal })
         .then((donnees) => {
           if (controleur.signal.aborted) return;
@@ -155,7 +158,7 @@ export default function CarteTab({ actif }) {
       clearTimeout(minuterie);
       controleur.abort();
     };
-  }, [depart, arrivee, heure, poids_bruit, poids_foule, relanceRoute]);
+  }, [depart, arrivee, heure, poids_bruit, poids_foule, beta, relanceRoute]);
 
   function rechercherOuVoirRoute() {
     if (!depart || !arrivee || calculEnCours) return;
@@ -360,6 +363,7 @@ export default function CarteTab({ actif }) {
           <div className={menuCarteOuvert ? "outils-carte" : "outils-carte outils-carte-ferme"}>
             <div className="entete-outils">
               <p className="resume-outils">{resumeMenu}</p>
+              {!menuCarteOuvert && <span className="heure-entete">{heure} h</span>}
               <button
                 type="button"
                 className="bouton bouton-menu"
@@ -472,6 +476,26 @@ export default function CarteTab({ actif }) {
               </button>
             </div>
           </section>
+        )}
+
+        {statutPosition === "ok" && maPosition && (
+          <button
+            type="button"
+            className="bouton-position"
+            aria-label="Recentrer sur ma position"
+            onClick={() => setPointRecentre({ lat: maPosition.lat, lng: maPosition.lng })}
+          >
+            <svg viewBox="0 0 24 24" width="26" height="26" aria-hidden="true">
+              <circle cx="12" cy="12" r="6.5" fill="none" stroke="currentColor" strokeWidth="2" />
+              <circle cx="12" cy="12" r="2.2" fill="currentColor" />
+              <path
+                d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              />
+            </svg>
+          </button>
         )}
 
         {route && itineraireLance && (

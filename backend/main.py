@@ -1,15 +1,17 @@
 """API FastAPI de Calmap : météo sensorielle et itinéraires apaisés.
 
-Le graphe enrichi (data/graph.pkl, produit par pipeline/build_graph.py) est
-chargé UNE seule fois au démarrage via le lifespan, puis pré-compilé en
-tableaux numpy pour servir la heatmap et la courbe « quand y aller » sans
-reparcourir le graphe à chaque requête.
+Au premier démarrage, le graphe enrichi (data/graph.pkl, produit par
+pipeline/build_graph.py) est compilé en tableaux numpy et mis en cache dans
+data/graph_compile.npz. Les démarrages suivants rechargent directement ce
+cache (quelques secondes au lieu de dépickler 80 Mo de graphe networkx) ;
+toutes les requêtes sont servies depuis ces tableaux.
 """
 from __future__ import annotations
 
 import math
 import pickle
 from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
@@ -30,11 +32,12 @@ except ImportError:  # lancement depuis backend/ (uvicorn main:app)
 
 RACINE = Path(__file__).resolve().parents[1]
 CHEMIN_GRAPHE = RACINE / "data" / "graph.pkl"
+CHEMIN_CACHE = RACINE / "data" / "graph_compile.npz"
 DOSSIER_FRONT = RACINE / "frontend" / "dist"
 
 MARGE_ZONE_DEG = 0.002       # tolérance autour de la zone de démo
 RAYON_QUAND_M = 150.0        # rayon d'analyse autour du point pour /api/quand
-MAX_CACHE_HEATMAP = 64       # cache des scores par heure/profil
+MAX_CACHE_HEATMAP = 64       # cache des scores par heure/jour/profil
 MAX_ARETES_HEATMAP = 20000   # plafond de la réponse heatmap : au-delà (vue large),
                              # les rues sont agrégées en « nuages » par quartier
                              # — la zone entière ferait 27 Mo / 145 000 tronçons ;
@@ -42,35 +45,40 @@ MAX_ARETES_HEATMAP = 20000   # plafond de la réponse heatmap : au-delà (vue la
 NUAGES_COLONNES = 40         # finesse de la grille d'agrégation des nuages
 
 # État global chargé une seule fois au démarrage (pas de base de données)
-ETAT: dict[str, Any] = {"graph": None}
-CACHE_SCORES_HEATMAP: dict[tuple[int, float, float], np.ndarray] = {}
+ETAT: dict[str, Any] = {"pret": False}
+CACHE_SCORES_HEATMAP: dict[tuple[int, int, float, float], np.ndarray] = {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Chargement et pré-calculs
+# Compilation, cache et chargement
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _precalculer(G: Any) -> None:
-    """Pré-compile les arêtes en tableaux numpy pour /api/heatmap et /api/quand."""
-    vues: set[tuple[int, int, int]] = set()
-    geometries: list[dict[str, Any]] = []
+def _compiler_affichage(G: Any) -> tuple[dict[str, np.ndarray],
+                                         dict[tuple[int, int, int], tuple[int, int]]]:
+    """Compile les tronçons d'affichage (heatmap) en tableaux numpy (préfixe aff_).
+
+    Une seule feature par tronçon : l'arête inverse du MultiDiGraph partage la
+    même géométrie via ident_vers_feature, réutilisé par routing.compiler_routage.
+    """
+    ident_vers_feature: dict[tuple[int, int, int], tuple[int, int]] = {}
+    offsets = [0]
+    coords_plats: list[list[float]] = []
     lden, n_bar, n_marche, n_ecole, n_commerce = [], [], [], [], []
     longueur: list[float] = []
     mil_lat, mil_lon = [], []
     min_lat, max_lat, min_lon, max_lon = [], [], [], []
 
     for u, v, k, attrs in G.edges(keys=True, data=True):
-        # une seule Feature par tronçon : l'arête inverse du MultiDiGraph est ignorée
         ident = (min(u, v), max(u, v), k)
-        if ident in vues:
+        if ident in ident_vers_feature:
             continue
-        vues.add(ident)
+        ident_vers_feature[ident] = (len(offsets) - 1, u)
 
-        pts = routing.coords_arete(G, u, v, attrs)
+        pts = [[round(x, 6), round(y, 6)] for x, y in routing.coords_arete(G, u, v, attrs)]
+        coords_plats.extend(pts)
+        offsets.append(len(coords_plats))
         xs = [p[0] for p in pts]
         ys = [p[1] for p in pts]
-        geometries.append({"type": "LineString",
-                           "coordinates": [[round(x, 6), round(y, 6)] for x, y in pts]})
         lden.append(float(attrs.get("lden", scoring.BRUIT_DEFAUT)))
         longueur.append(float(attrs.get("length", 0.0)))
         n_bar.append(float(attrs.get("n_bar", 0)))
@@ -85,43 +93,95 @@ def _precalculer(G: Any) -> None:
         min_lat.append(min(ys))
         max_lat.append(max(ys))
 
-    ETAT.update({
-        "geometries": geometries,
-        "longueur": np.array(longueur),
-        "lden": np.array(lden),
-        "n_bar": np.array(n_bar),
-        "n_marche": np.array(n_marche),
-        "n_ecole": np.array(n_ecole),
-        "n_commerce": np.array(n_commerce),
-        "mil_lat": np.array(mil_lat),
-        "mil_lon": np.array(mil_lon),
-        "min_lat": np.array(min_lat),
-        "max_lat": np.array(max_lat),
-        "min_lon": np.array(min_lon),
-        "max_lon": np.array(max_lon),
-    })
-
     # Bornes de la zone de démo (pour valider les coordonnées reçues)
-    xs = [d["x"] for _, d in G.nodes(data=True)]
-    ys = [d["y"] for _, d in G.nodes(data=True)]
-    ETAT["bornes"] = (min(ys) - MARGE_ZONE_DEG, max(ys) + MARGE_ZONE_DEG,
-                      min(xs) - MARGE_ZONE_DEG, max(xs) + MARGE_ZONE_DEG)
+    noeuds_x = [d["x"] for _, d in G.nodes(data=True)]
+    noeuds_y = [d["y"] for _, d in G.nodes(data=True)]
+    bornes = np.array([min(noeuds_y) - MARGE_ZONE_DEG, max(noeuds_y) + MARGE_ZONE_DEG,
+                       min(noeuds_x) - MARGE_ZONE_DEG, max(noeuds_x) + MARGE_ZONE_DEG])
+
+    tableaux = {
+        "aff_offsets": np.array(offsets, dtype=np.int64),
+        "aff_coords": np.array(coords_plats, dtype=float),
+        "aff_longueur": np.array(longueur),
+        "aff_lden": np.array(lden),
+        "aff_n_bar": np.array(n_bar),
+        "aff_n_marche": np.array(n_marche),
+        "aff_n_ecole": np.array(n_ecole),
+        "aff_n_commerce": np.array(n_commerce),
+        "aff_mil_lat": np.array(mil_lat),
+        "aff_mil_lon": np.array(mil_lon),
+        "aff_min_lat": np.array(min_lat),
+        "aff_max_lat": np.array(max_lat),
+        "aff_min_lon": np.array(min_lon),
+        "aff_max_lon": np.array(max_lon),
+        "bornes": bornes,
+        "meta_bruit_source": np.array(G.graph.get("bruit_source", "synthetique")),
+    }
+    return tableaux, ident_vers_feature
+
+
+def _compiler_depuis_pickle() -> dict[str, np.ndarray]:
+    """Charge le graphe networkx et le compile en tableaux, mis en cache npz."""
+    with open(CHEMIN_GRAPHE, "rb") as f:
+        G = pickle.load(f)
+    tableaux, ident_vers_feature = _compiler_affichage(G)
+    tableaux.update(routing.compiler_routage(G, ident_vers_feature))
+    # écriture via un fichier temporaire : jamais de cache tronqué sur disque
+    # (nom en .npz, sinon np.savez ajouterait lui-même l'extension)
+    temporaire = CHEMIN_CACHE.with_name(CHEMIN_CACHE.stem + ".tmp.npz")
+    np.savez_compressed(temporaire, **tableaux)
+    temporaire.replace(CHEMIN_CACHE)
+    print(f"✅ Cache compilé écrit : {CHEMIN_CACHE.name} "
+          f"({CHEMIN_CACHE.stat().st_size / 1e6:.0f} Mo)")
+    return tableaux
+
+
+def _installer(tableaux: dict[str, np.ndarray]) -> None:
+    """Installe les tableaux dans l'état global et prépare le routage."""
+    ETAT.update({
+        "feat_offsets": tableaux["aff_offsets"],
+        "feat_coords": tableaux["aff_coords"],
+        "longueur": tableaux["aff_longueur"],
+        "lden": tableaux["aff_lden"],
+        "n_bar": tableaux["aff_n_bar"],
+        "n_marche": tableaux["aff_n_marche"],
+        "n_ecole": tableaux["aff_n_ecole"],
+        "n_commerce": tableaux["aff_n_commerce"],
+        "mil_lat": tableaux["aff_mil_lat"],
+        "mil_lon": tableaux["aff_mil_lon"],
+        "min_lat": tableaux["aff_min_lat"],
+        "max_lat": tableaux["aff_max_lat"],
+        "min_lon": tableaux["aff_min_lon"],
+        "max_lon": tableaux["aff_max_lon"],
+        "bornes": tuple(float(x) for x in tableaux["bornes"]),
+        "n_aretes": int(len(tableaux["rt_ui"])),
+        "bruit_source": str(tableaux["meta_bruit_source"]),
+    })
+    ETAT["routage"] = routing.preparer_routage(tableaux, ETAT["feat_offsets"],
+                                               ETAT["feat_coords"])
+    ETAT["pret"] = True
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Charge le graphe une seule fois au démarrage du serveur."""
-    if not CHEMIN_GRAPHE.exists():
+    """Charge le cache compilé (ou le construit depuis graph.pkl) au démarrage."""
+    cache_valide = CHEMIN_CACHE.exists() and (
+        not CHEMIN_GRAPHE.exists()
+        or CHEMIN_CACHE.stat().st_mtime >= CHEMIN_GRAPHE.stat().st_mtime)
+    if cache_valide:
+        with np.load(CHEMIN_CACHE) as archive:
+            tableaux = {cle: archive[cle] for cle in archive.files}
+    elif CHEMIN_GRAPHE.exists():
+        tableaux = _compiler_depuis_pickle()
+    else:
         message = (f"Graphe introuvable : {CHEMIN_GRAPHE}\n"
                    "Lancez d'abord le pipeline :  python pipeline/build_graph.py")
         print(f"❌ {message}")
         raise RuntimeError(message)
-    with open(CHEMIN_GRAPHE, "rb") as f:
-        ETAT["graph"] = pickle.load(f)
-    _precalculer(ETAT["graph"])
-    ETAT["routage"] = routing.preparer_routage(ETAT["graph"])
-    print(f"✅ Graphe chargé : {ETAT['graph'].number_of_edges()} arêtes "
-          f"(bruit : {ETAT['graph'].graph.get('bruit_source', 'synthetique')})")
+    _installer(tableaux)
+    print(f"✅ Graphe chargé : {ETAT['n_aretes']} arêtes "
+          f"(bruit : {ETAT['bruit_source']}, "
+          f"source : {'cache npz' if cache_valide else 'pickle compilé'})")
     yield
 
 
@@ -162,6 +222,16 @@ def _valider_heure(heure: int) -> None:
         raise HTTPException(status_code=400, detail="heure doit être entre 0 et 23")
 
 
+def _valider_jour(jour: Optional[int]) -> int:
+    """Jour de semaine 0 = lundi … 6 = dimanche ; défaut : aujourd'hui."""
+    if jour is None:
+        return datetime.now().weekday()
+    if not 0 <= jour <= 6:
+        raise HTTPException(status_code=400,
+                            detail="jour doit être entre 0 (lundi) et 6 (dimanche)")
+    return jour
+
+
 def _valider_poids(poids_bruit: float, poids_foule: float) -> None:
     if not (0.0 <= poids_bruit <= 1.0 and 0.0 <= poids_foule <= 1.0):
         raise HTTPException(status_code=400,
@@ -176,22 +246,25 @@ def _valider_point(lat: float, lon: float, nom: str) -> None:
                                    "démo (Paris et Issy-les-Moulineaux)")
 
 
-def _cle_cache_heatmap(heure: int, poids_bruit: float,
-                       poids_foule: float) -> tuple[int, float, float]:
-    return (heure, round(poids_bruit, 3), round(poids_foule, 3))
+def _geometrie_feature(i: int) -> dict[str, Any]:
+    """Géométrie GeoJSON du tronçon i, découpée dans les tableaux plats."""
+    offsets = ETAT["feat_offsets"]
+    return {"type": "LineString",
+            "coordinates": ETAT["feat_coords"][offsets[i]:offsets[i + 1]].tolist()}
 
 
-def _scores_heatmap(heure: int, poids_bruit: float,
+def _scores_heatmap(heure: int, jour: int, poids_bruit: float,
                     poids_foule: float) -> np.ndarray:
-    """Score toutes les aretes une fois par combinaison heure/profil."""
-    cle = _cle_cache_heatmap(heure, poids_bruit, poids_foule)
+    """Score toutes les aretes une fois par combinaison heure/jour/profil."""
+    cle = (heure, jour, round(poids_bruit, 3), round(poids_foule, 3))
     scores = CACHE_SCORES_HEATMAP.get(cle)
     if scores is None:
         if len(CACHE_SCORES_HEATMAP) >= MAX_CACHE_HEATMAP:
             CACHE_SCORES_HEATMAP.pop(next(iter(CACHE_SCORES_HEATMAP)))
         profil = {"bruit": poids_bruit, "foule": poids_foule}
         scores = scoring.score(ETAT["lden"], ETAT["n_bar"], ETAT["n_marche"],
-                               ETAT["n_ecole"], ETAT["n_commerce"], heure, profil)
+                               ETAT["n_ecole"], ETAT["n_commerce"], heure, profil,
+                               jour)
         CACHE_SCORES_HEATMAP[cle] = scores
     return scores
 
@@ -201,7 +274,7 @@ def _indices_bbox(sud: Optional[float], nord: Optional[float],
     """Filtre les aretes dont la bbox intersecte la fenetre visible."""
     bornes = (sud, nord, ouest, est)
     if all(valeur is None for valeur in bornes):
-        return np.arange(len(ETAT["geometries"]))
+        return np.arange(len(ETAT["longueur"]))
     if any(valeur is None for valeur in bornes):
         raise HTTPException(status_code=400, detail="limites de carte incompletes")
 
@@ -325,28 +398,28 @@ def _haversine_m(lats: np.ndarray, lons: np.ndarray, lat: float,
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Endpoints (contrat d'API figé — consommé par le frontend React/Leaflet)
+# Endpoints (contrat d'API figé — consommé par le frontend React/Leaflet ;
+# `jour` est un ajout optionnel rétrocompatible, défaut = jour courant)
 # ─────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/health")
 def api_health() -> dict[str, Any]:
     """État du service et provenance des données de bruit."""
-    G = ETAT["graph"]
     return {
         "status": "ok",
-        "graph_loaded": G is not None,
-        "edges": G.number_of_edges() if G is not None else 0,
-        "bruit_source": G.graph.get("bruit_source", "synthetique") if G is not None
-        else "synthetique",
+        "graph_loaded": ETAT["pret"],
+        "edges": ETAT.get("n_aretes", 0),
+        "bruit_source": ETAT.get("bruit_source", "synthetique"),
     }
 
 
 @app.get("/api/route")
 def api_route(from_lat: float, from_lon: float, to_lat: float, to_lon: float,
               heure: int = 14, poids_bruit: float = 0.5, poids_foule: float = 0.5,
-              beta: float = 3.0) -> dict[str, Any]:
+              beta: float = 3.0, jour: Optional[int] = None) -> dict[str, Any]:
     """Double itinéraire rapide / calme avec métriques comparées."""
     _valider_heure(heure)
+    jour_semaine = _valider_jour(jour)
     _valider_poids(poids_bruit, poids_foule)
     if not 0.0 <= beta <= 20.0:
         raise HTTPException(status_code=400, detail="beta doit être entre 0 et 20")
@@ -355,9 +428,9 @@ def api_route(from_lat: float, from_lon: float, to_lat: float, to_lon: float,
 
     profil = {"bruit": poids_bruit, "foule": poids_foule}
     try:
-        return routing.calculer_itineraires(ETAT["graph"], ETAT["routage"],
-                                            from_lat, from_lon,
-                                            to_lat, to_lon, heure, profil, beta)
+        return routing.calculer_itineraires(ETAT["routage"], from_lat, from_lon,
+                                            to_lat, to_lon, heure, profil, beta,
+                                            jour_semaine)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -366,12 +439,14 @@ def api_route(from_lat: float, from_lon: float, to_lat: float, to_lon: float,
 def api_heatmap(heure: int = 14, poids_bruit: float = 0.5,
                 poids_foule: float = 0.5, sud: Optional[float] = None,
                 nord: Optional[float] = None, ouest: Optional[float] = None,
-                est: Optional[float] = None) -> dict[str, Any]:
+                est: Optional[float] = None,
+                jour: Optional[int] = None) -> dict[str, Any]:
     """Carte de chaleur sensorielle, limitee a la zone visible si fournie."""
     _valider_heure(heure)
+    jour_semaine = _valider_jour(jour)
     _valider_poids(poids_bruit, poids_foule)
 
-    scores = _scores_heatmap(heure, poids_bruit, poids_foule)
+    scores = _scores_heatmap(heure, jour_semaine, poids_bruit, poids_foule)
     indices = _indices_bbox(sud, nord, ouest, est)
 
     # Vue large : agrégation en nuages transparents par quartier, sinon le
@@ -390,7 +465,7 @@ def api_heatmap(heure: int = 14, poids_bruit: float = 0.5,
         i = int(indice_brut)
         features.append({
             "type": "Feature",
-            "geometry": ETAT["geometries"][i],
+            "geometry": _geometrie_feature(i),
             "properties": {"score": float(round(scores[i], 3)),
                            "lden": float(round(ETAT["lden"][i], 1))},
         })
@@ -399,8 +474,9 @@ def api_heatmap(heure: int = 14, poids_bruit: float = 0.5,
 
 @app.get("/api/quand")
 def api_quand(lat: float, lon: float, poids_bruit: float = 0.5,
-              poids_foule: float = 0.5) -> dict[str, Any]:
+              poids_foule: float = 0.5, jour: Optional[int] = None) -> dict[str, Any]:
     """Courbe « quand y aller » : score moyen par heure autour d'une destination."""
+    jour_semaine = _valider_jour(jour)
     _valider_poids(poids_bruit, poids_foule)
     _valider_point(lat, lon, "destination")
 
@@ -415,7 +491,7 @@ def api_quand(lat: float, lon: float, poids_bruit: float = 0.5,
     for heure in range(24):
         s = scoring.score(ETAT["lden"][masque], ETAT["n_bar"][masque],
                           ETAT["n_marche"][masque], ETAT["n_ecole"][masque],
-                          ETAT["n_commerce"][masque], heure, profil)
+                          ETAT["n_commerce"][masque], heure, profil, jour_semaine)
         scores_horaires.append({"heure": heure, "score": float(round(np.mean(s), 3))})
 
     # Fenêtre glissante de 2 h de score moyen minimal, entre 8 h et 21 h

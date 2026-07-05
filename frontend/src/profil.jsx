@@ -102,3 +102,16 @@ export function sensibiliteEffective(valeur, etat) {
   const facteur = FACTEURS_ETAT[etat] ?? 1.0;
   return Math.min(100, Math.round(valeur * facteur));
 }
+
+// β de base du coût « calme » : cout = length × (1 + β·S), cf. backend/routing.py.
+const BETA_BASE = 3;
+
+/**
+ * β envoyé à /api/route : la base est amplifiée par l'état du moment (jusqu'à
+ * ×1,4 en surcharge) — plus la journée est difficile, plus un détour long est
+ * acceptable pour rester au calme. Chaîne stable pour les effets React.
+ */
+export function betaApi(profil) {
+  const facteur = FACTEURS_ETAT[profil.etat] ?? 1.0;
+  return (BETA_BASE * facteur).toFixed(1);
+}

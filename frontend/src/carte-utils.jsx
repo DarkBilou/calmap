@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import { TileLayer, useMap, useMapEvents } from "react-leaflet";
-import { appelApi } from "./api";
+import { appelApi, jourSemaine } from "./api";
 import { composantesScore, couleurScore } from "./couleurs";
 
 // Fond de carte volontairement sobre (CARTO Positron) : la couleur est
@@ -224,7 +224,8 @@ export function CoucheHeatmapAuto({ actif, heure, poidsBruit, poidsFoule }) {
     const minuterie = setTimeout(() => {
       appelApi(
         "/api/heatmap",
-        { heure, poids_bruit: poidsBruit, poids_foule: poidsFoule, ...bornes },
+        { heure, jour: jourSemaine(), poids_bruit: poidsBruit,
+          poids_foule: poidsFoule, ...bornes },
         { signal: controleur.signal }
       )
         .then((reponse) => {

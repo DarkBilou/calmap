@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { MapContainer, CircleMarker } from "react-leaflet";
-import { appelApi } from "../api";
+import { appelApi, jourSemaine } from "../api";
 import { useGeolocalisation } from "../geolocalisation";
 import { useProfil, poidsApi } from "../profil";
 import { ACCENT, CENTRE_DEMO, LIMITES_DEMO, ZOOM_DEMO } from "../config";
@@ -50,6 +50,7 @@ export default function QuandTab({ actif }) {
     appelApi("/api/quand", {
       lat: destination.lat.toFixed(6),
       lon: destination.lng.toFixed(6),
+      jour: jourSemaine(),
       poids_bruit,
       poids_foule,
     })
