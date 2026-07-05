@@ -37,6 +37,7 @@ body {
   line-height: 1.5;
   color: var(--encre);
   background: var(--fond);
+  overflow: hidden;
   -webkit-tap-highlight-color: rgba(42, 157, 143, 0.15);
 }
 
@@ -283,9 +284,10 @@ input[type="range"]::-moz-range-thumb {
   top: 10px;
   left: 10px;
   right: 10px;
-  z-index: 1000;
-  max-height: calc(100% - 24px);
+  z-index: 1100;
+  max-height: min(72dvh, calc(100% - 24px));
   overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface);
   border: 1px solid var(--bord);
   border-radius: 14px;
@@ -294,6 +296,8 @@ input[type="range"]::-moz-range-thumb {
 }
 
 .outils-carte-ferme {
+  max-height: none;
+  overflow: visible;
   padding: 8px 10px;
 }
 
@@ -360,6 +364,7 @@ input[type="range"]::-moz-range-thumb {
   padding: 0;
   max-height: 190px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--bord);
   border-radius: 10px;
   background: var(--surface);
@@ -417,7 +422,10 @@ input[type="range"]::-moz-range-thumb {
   left: 12px;
   right: 12px;
   bottom: 12px;
-  z-index: 1000;
+  z-index: 1050;
+  max-height: min(42dvh, 320px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--surface);
   border: 1px solid var(--bord);
   border-radius: 14px;
@@ -429,6 +437,7 @@ input[type="range"]::-moz-range-thumb {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
 }
 

@@ -84,6 +84,7 @@ export default function CarteTab({ actif }) {
   const [route, setRoute] = useState(null);
   const [calculEnCours, setCalculEnCours] = useState(false);
   const [erreurRoute, setErreurRoute] = useState("");
+  const [relanceRoute, setRelanceRoute] = useState(0);
   // Itinéraire lancé ("calme" | "rapide" | null) : seul son tracé reste
   // affiché, la fiche passe en mode suivi avec le bouton Quitter.
   const [itineraireLance, setItineraireLance] = useState(null);
@@ -96,7 +97,7 @@ export default function CarteTab({ actif }) {
   // Heatmap : suit l'heure et le profil, avec un léger debounce. La requête
   // précédente est annulée : les réponses obsolètes ne s'empilent pas.
   useEffect(() => {
-    if (!bornesCarte) return undefined;
+    if (!bornesCarte || itineraireLance) return undefined;
     const controleur = new AbortController();
     const minuterie = setTimeout(() => {
       appelApi("/api/heatmap", { heure, poids_bruit, poids_foule, ...bornesCarte },
@@ -114,7 +115,7 @@ export default function CarteTab({ actif }) {
       clearTimeout(minuterie);
       controleur.abort();
     };
-  }, [heure, poids_bruit, poids_foule, bornesCarte]);
+  }, [heure, poids_bruit, poids_foule, bornesCarte, itineraireLance]);
 
   // Itinéraire : recalculé si les points, l'heure ou le profil changent.
   useEffect(() => {
@@ -143,6 +144,7 @@ export default function CarteTab({ actif }) {
           if (controleur.signal.aborted || erreur.name === "AbortError") return;
           setRoute(null);
           setErreurRoute(erreur.message);
+          setMenuCarteOuvert(true);
         })
         .finally(() => {
           if (!controleur.signal.aborted) setCalculEnCours(false);
@@ -152,7 +154,15 @@ export default function CarteTab({ actif }) {
       clearTimeout(minuterie);
       controleur.abort();
     };
-  }, [depart, arrivee, heure, poids_bruit, poids_foule]);
+  }, [depart, arrivee, heure, poids_bruit, poids_foule, relanceRoute]);
+
+  function rechercherOuVoirRoute() {
+    if (!depart || !arrivee || calculEnCours) return;
+    setErreurRoute("");
+    if (!route) setRelanceRoute((n) => n + 1);
+    setMenuCarteOuvert(false);
+    setPointRecentre({ lat: depart.lat, lng: depart.lng });
+  }
 
   function lancerItineraire(type) {
     setItineraireLance(type);
@@ -286,6 +296,17 @@ export default function CarteTab({ actif }) {
   else if (depart && arrivee) resumeMenu = "Départ et arrivée choisis";
   else if (depart) resumeMenu = "Départ choisi";
 
+  const heatmapActive = actif && !itineraireLance;
+  const afficherOutilsCarte = !itineraireLance;
+  const afficherFeuilleChoix = route && !itineraireLance && !menuCarteOuvert;
+  const libelleRecherche = calculEnCours
+    ? "Calcul…"
+    : route
+      ? "Voir l'itinéraire"
+      : erreurRoute
+        ? "Réessayer"
+        : "Rechercher";
+
   return (
     <div className="carte-onglet">
       <div className="zone-carte">
@@ -302,7 +323,7 @@ export default function CarteTab({ actif }) {
           <FondDeCarte />
           <RafraichirTaille actif={actif} />
           <LimiterDezoomCarte actif={actif} limites={LIMITES_DEMO} />
-          <SuivreBornesCarte actif={actif} onChange={setBornesCarte} />
+          <SuivreBornesCarte actif={heatmapActive} onChange={setBornesCarte} />
           <CentrerSurPoint point={pointRecentre} />
           <ClicsCarte onClic={clicCarte} />
           {/* Pendant un itinéraire lancé, la heatmap s'efface : seul le trajet
@@ -339,80 +360,78 @@ export default function CarteTab({ actif }) {
           )}
         </MapContainer>
 
-        <div className={menuCarteOuvert ? "outils-carte" : "outils-carte outils-carte-ferme"}>
-          <div className="entete-outils">
-            <p className="resume-outils">{resumeMenu}</p>
-            <button
-              type="button"
-              className="bouton bouton-menu"
-              aria-expanded={menuCarteOuvert}
-              onClick={() => setMenuCarteOuvert(!menuCarteOuvert)}
-            >
-              {menuCarteOuvert ? "Réduire" : "Ouvrir"}
-            </button>
-          </div>
-          {menuCarteOuvert && (
-            <div className="contenu-outils">
-              <div className="recherche-itineraire" aria-label="Recherche d'itineraire">
-                <AdresseSearch
-                  label="Adresse de départ"
-                  value={texteDepart}
-                  onChange={changerTexteDepart}
-                  onChoisir={(suggestion) => choisirAdresse("depart", suggestion)}
-                  placeholder="Rue, lieu, adresse..."
-                  rechercheDesactivee={texteDepart === TEXTE_POINT_CARTE
-                    || texteDepart === TEXTE_MA_POSITION
-                    || texteDepart === adresseAutoDepart}
-                />
-                {statutPosition === "ok" && !departEstPosition && (
-                  <button type="button" className="bouton" onClick={utiliserMaPosition}>
-                    Partir de ma position
-                  </button>
-                )}
-                <AdresseSearch
-                  label="Adresse d'arrivée"
-                  value={texteArrivee}
-                  onChange={changerTexteArrivee}
-                  onChoisir={(suggestion) => choisirAdresse("arrivee", suggestion)}
-                  placeholder="Rue, lieu, adresse..."
-                  rechercheDesactivee={texteArrivee === TEXTE_POINT_CARTE
-                    || texteArrivee === adresseAutoArrivee}
-                />
-              </div>
-              <HourSlider heure={heure} onChange={setHeure} />
-              <div className="rang-boutons">
-                <button
-                  type="button"
-                  className="bouton bouton-plein bouton-rechercher"
-                  disabled={!depart || !arrivee}
-                  onClick={() => {
-                    setMenuCarteOuvert(false);
-                    // zoom sur le départ pour voir directement par où partir
-                    // (nouvel objet à chaque clic : recentre même si inchangé)
-                    setPointRecentre({ lat: depart.lat, lng: depart.lng });
-                  }}
-                >
-                  Rechercher
-                </button>
-              </div>
-              {statutPosition === "hors-zone" && (
-                <p className="texte-discret" role="status">
-                  Tu es en dehors de la zone de démo (Paris + Issy) : choisis le départ sur la carte.
-                </p>
-              )}
-              {indice && <p className="indice" role="status">{indice}</p>}
-              {erreurHeatmap && <p className="texte-erreur" role="status">{erreurHeatmap}</p>}
-              {erreurRoute && <p className="texte-erreur" role="status">{erreurRoute}</p>}
-              <div className="legende-heatmap">
-                <span>calme</span>
-                <span className="degrade" aria-hidden="true" />
-                <span>animé</span>
-              </div>
+        {afficherOutilsCarte && (
+          <div className={menuCarteOuvert ? "outils-carte" : "outils-carte outils-carte-ferme"}>
+            <div className="entete-outils">
+              <p className="resume-outils">{resumeMenu}</p>
+              <button
+                type="button"
+                className="bouton bouton-menu"
+                aria-expanded={menuCarteOuvert}
+                onClick={() => setMenuCarteOuvert(!menuCarteOuvert)}
+              >
+                {menuCarteOuvert ? "Réduire" : "Ouvrir"}
+              </button>
             </div>
-          )}
-        </div>
+            {menuCarteOuvert && (
+              <div className="contenu-outils">
+                <div className="recherche-itineraire" aria-label="Recherche d'itineraire">
+                  <AdresseSearch
+                    label="Adresse de départ"
+                    value={texteDepart}
+                    onChange={changerTexteDepart}
+                    onChoisir={(suggestion) => choisirAdresse("depart", suggestion)}
+                    placeholder="Rue, lieu, adresse..."
+                    rechercheDesactivee={texteDepart === TEXTE_POINT_CARTE
+                      || texteDepart === TEXTE_MA_POSITION
+                      || texteDepart === adresseAutoDepart}
+                  />
+                  {statutPosition === "ok" && !departEstPosition && (
+                    <button type="button" className="bouton" onClick={utiliserMaPosition}>
+                      Partir de ma position
+                    </button>
+                  )}
+                  <AdresseSearch
+                    label="Adresse d'arrivée"
+                    value={texteArrivee}
+                    onChange={changerTexteArrivee}
+                    onChoisir={(suggestion) => choisirAdresse("arrivee", suggestion)}
+                    placeholder="Rue, lieu, adresse..."
+                    rechercheDesactivee={texteArrivee === TEXTE_POINT_CARTE
+                      || texteArrivee === adresseAutoArrivee}
+                  />
+                </div>
+                <HourSlider heure={heure} onChange={setHeure} />
+                <div className="rang-boutons">
+                  <button
+                    type="button"
+                    className="bouton bouton-plein bouton-rechercher"
+                    disabled={!depart || !arrivee || calculEnCours}
+                    aria-busy={calculEnCours}
+                    onClick={rechercherOuVoirRoute}
+                  >
+                    {libelleRecherche}
+                  </button>
+                </div>
+                {statutPosition === "hors-zone" && (
+                  <p className="texte-discret" role="status">
+                    Tu es en dehors de la zone de démo (Paris + Issy) : choisis le départ sur la carte.
+                  </p>
+                )}
+                {indice && <p className="indice" role="status">{indice}</p>}
+                {erreurHeatmap && <p className="texte-erreur" role="status">{erreurHeatmap}</p>}
+                {erreurRoute && <p className="texte-erreur" role="status">{erreurRoute}</p>}
+                <div className="legende-heatmap">
+                  <span>calme</span>
+                  <span className="degrade" aria-hidden="true" />
+                  <span>animé</span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
-        {route && !itineraireLance && (
+        {afficherFeuilleChoix && (
           <section className="feuille" aria-label="Comparaison des itinéraires">
             <div className="feuille-titre">
               <h2>Itinéraire calme</h2>
