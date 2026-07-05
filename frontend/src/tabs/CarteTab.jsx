@@ -8,6 +8,7 @@ import {
   CentrerSurPoint,
   ClicsCarte,
   CoucheGeoJson,
+  CoucheNuages,
   FondDeCarte,
   LimiterDezoomCarte,
   RafraichirTaille,
@@ -22,6 +23,12 @@ const TEXTE_POINT_CARTE = "Point choisi sur la carte";
 
 function styleHeatmap(feature) {
   return { color: couleurScore(feature.properties.score), weight: 3, opacity: 0.75 };
+}
+
+// Vue dézoomée : le backend agrège les rues en « nuages » (Points + taille de
+// cellule), rendus en une seule image floutée. Vue rapprochée : les rues.
+function estHeatmapNuages(donnees) {
+  return Boolean(donnees?.features?.[0]?.properties?.nuage);
 }
 
 function texteDistance(m) {
@@ -68,31 +75,36 @@ export default function CarteTab({ actif }) {
   const [calculEnCours, setCalculEnCours] = useState(false);
   const [erreurRoute, setErreurRoute] = useState("");
 
-  // Heatmap : suit l'heure et le profil, avec un léger debounce.
+  // Heatmap : suit l'heure et le profil, avec un léger debounce. La requête
+  // précédente est annulée : les réponses obsolètes ne s'empilent pas.
   useEffect(() => {
     if (!bornesCarte) return undefined;
-    let annule = false;
+    const controleur = new AbortController();
     const minuterie = setTimeout(() => {
-      appelApi("/api/heatmap", { heure, poids_bruit, poids_foule, ...bornesCarte })
+      appelApi("/api/heatmap", { heure, poids_bruit, poids_foule, ...bornesCarte },
+        { signal: controleur.signal })
         .then((donnees) => {
-          if (annule) return;
+          if (controleur.signal.aborted) return;
           setHeatmap(donnees);
           setErreurHeatmap("");
         })
         .catch((erreur) => {
-          if (!annule) setErreurHeatmap(erreur.message);
+          if (erreur.name !== "AbortError") setErreurHeatmap(erreur.message);
         });
     }, 250);
     return () => {
-      annule = true;
       clearTimeout(minuterie);
+      controleur.abort();
     };
   }, [heure, poids_bruit, poids_foule, bornesCarte]);
 
   // Itinéraire : recalculé si les points, l'heure ou le profil changent.
   useEffect(() => {
-    if (!depart || !arrivee) return undefined;
-    let annule = false;
+    if (!depart || !arrivee) {
+      setCalculEnCours(false); // un point vient d'être effacé : plus rien à calculer
+      return undefined;
+    }
+    const controleur = new AbortController();
     setCalculEnCours(true);
     const minuterie = setTimeout(() => {
       appelApi("/api/route", {
@@ -103,24 +115,24 @@ export default function CarteTab({ actif }) {
         heure,
         poids_bruit,
         poids_foule,
-      })
+      }, { signal: controleur.signal })
         .then((donnees) => {
-          if (annule) return;
+          if (controleur.signal.aborted) return;
           setRoute(donnees);
           setErreurRoute("");
         })
         .catch((erreur) => {
-          if (annule) return;
+          if (controleur.signal.aborted || erreur.name === "AbortError") return;
           setRoute(null);
           setErreurRoute(erreur.message);
         })
         .finally(() => {
-          if (!annule) setCalculEnCours(false);
+          if (!controleur.signal.aborted) setCalculEnCours(false);
         });
     }, 250);
     return () => {
-      annule = true;
       clearTimeout(minuterie);
+      controleur.abort();
     };
   }, [depart, arrivee, heure, poids_bruit, poids_foule]);
 
@@ -226,7 +238,9 @@ export default function CarteTab({ actif }) {
           <SuivreBornesCarte actif={actif} onChange={setBornesCarte} />
           <CentrerSurPoint point={pointRecentre} />
           <ClicsCarte onClic={clicCarte} />
-          <CoucheGeoJson donnees={heatmap} style={styleHeatmap} />
+          {estHeatmapNuages(heatmap)
+            ? <CoucheNuages donnees={heatmap} />
+            : <CoucheGeoJson donnees={heatmap} style={styleHeatmap} />}
           {route && <CoucheGeoJson donnees={route.rapide.geojson} style={() => STYLE_RAPIDE} />}
           {route && <CoucheGeoJson donnees={route.calme.geojson} style={() => STYLE_CALME} />}
           {depart && (

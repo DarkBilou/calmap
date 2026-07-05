@@ -7,12 +7,18 @@ const ARRETS = [
   [0xe7, 0x6f, 0x51], // #E76F51 — animé
 ];
 
-/** Couleur CSS pour un score sensoriel ∈ [0, 1]. */
-export function couleurScore(score) {
+/** Composantes [r, g, b] pour un score sensoriel ∈ [0, 1]. */
+export function composantesScore(score) {
   const s = Math.min(1, Math.max(0, Number(score) || 0));
   const position = s * (ARRETS.length - 1);
   const i = Math.min(ARRETS.length - 2, Math.floor(position));
   const t = position - i;
   const canal = (k) => Math.round(ARRETS[i][k] + (ARRETS[i + 1][k] - ARRETS[i][k]) * t);
-  return `rgb(${canal(0)}, ${canal(1)}, ${canal(2)})`;
+  return [canal(0), canal(1), canal(2)];
+}
+
+/** Couleur CSS pour un score sensoriel ∈ [0, 1]. */
+export function couleurScore(score) {
+  const [r, g, b] = composantesScore(score);
+  return `rgb(${r}, ${g}, ${b})`;
 }

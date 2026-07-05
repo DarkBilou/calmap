@@ -30,7 +30,7 @@ invalides ou point hors zone. Le serveur ne crashe jamais.
 | Endpoint | Paramètres | Réponse |
 |---|---|---|
 | `GET /api/health` | — | `{status, graph_loaded, edges, bruit_source: "reel"\|"synthetique"}` |
-| `GET /api/heatmap` | `heure` 0-23, `poids_bruit` 0-1, `poids_foule` 0-1, `sud/nord/ouest/est` optionnels | FeatureCollection de LineString, `properties: {score, lden}` (rues de la zone visible ; scores caches par heure/profil) |
+| `GET /api/heatmap` | `heure` 0-23, `poids_bruit` 0-1, `poids_foule` 0-1, `sud/nord/ouest/est` optionnels | FeatureCollection, `properties: {score, lden}` ; rues (LineString) découpées en ovale autour de Paris ; au-delà de 20 000 tronçons visibles (vue large), « nuages » agrégés par quartier (Point + `nuage: true`, `demi_lat`/`demi_lon`) rendus côté client en une image floutée transparente (fondu continu) ; réponses gzippées ; scores caches par heure/profil |
 | `GET /api/route` | `from_lat/lon`, `to_lat/lon`, `heure`, `poids_bruit`, `poids_foule`, `beta` | `{rapide: {geojson, distance_m, duree_min, exposition}, calme: {idem + delta_duree_min, delta_exposition_pct}, confiance}` |
 | `GET /api/quand` | `lat`, `lon`, `poids_bruit`, `poids_foule` | `{scores_horaires: [{heure, score}×24], creneau_optimal: {debut, fin}}` (rues < 150 m, créneau 2 h entre 8 h et 21 h) |
 

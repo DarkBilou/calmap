@@ -4,7 +4,7 @@ import { API_BASE_URL, NOMINATIM_SEARCH_URL, NOMINATIM_VIEWBOX } from "./config"
  * Appelle l'API Calmap et renvoie le JSON, ou lève une Error au message
  * calme et actionnable (affiché tel quel dans l'interface, jamais brut).
  */
-export async function appelApi(chemin, params = {}) {
+export async function appelApi(chemin, params = {}, { signal } = {}) {
   const url = new URL(API_BASE_URL + chemin, window.location.origin);
   for (const [cle, valeur] of Object.entries(params)) {
     url.searchParams.set(cle, valeur);
@@ -12,8 +12,9 @@ export async function appelApi(chemin, params = {}) {
 
   let reponse;
   try {
-    reponse = await fetch(url);
-  } catch {
+    reponse = await fetch(url, { signal });
+  } catch (erreur) {
+    if (erreur.name === "AbortError") throw erreur; // requête annulée, pas une panne
     throw new Error("Le serveur ne répond pas. Vérifie ta connexion, puis réessaie.");
   }
 
