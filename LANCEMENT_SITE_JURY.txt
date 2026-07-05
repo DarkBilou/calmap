@@ -1,0 +1,82 @@
+CALMAP - COMMENT LANCER LE SITE
+================================
+
+Emplacement du projet :
+C:\Users\bilel\Documents\Bilel\demo_calmap
+
+Prerequis :
+- Python 3.11 ou plus
+- Node.js 18 ou plus, avec npm
+- PowerShell ou Invite de commandes Windows
+
+
+METHODE RECOMMANDEE
+-------------------
+
+Depuis la racine du projet, lancer :
+
+  .\start.bat
+
+Ce script :
+- verifie Python ;
+- installe les dependances Python si besoin ;
+- verifie que le graphe de donnees existe ;
+- installe les dependances frontend si besoin ;
+- construit le frontend ;
+- lance le serveur web.
+
+Une fois le serveur lance, ouvrir :
+
+  http://127.0.0.1:8000/
+
+Il faut garder le terminal ouvert pendant la demonstration.
+Pour arreter le site, faire Ctrl+C dans le terminal.
+
+
+METHODE RAPIDE SI LES DEPENDANCES SONT DEJA INSTALLEES
+------------------------------------------------------
+
+Depuis la racine du projet :
+
+  powershell -ExecutionPolicy Bypass -File .\start.ps1 -SkipInstall
+
+Cette commande evite de reinstaller les dependances et lance directement
+la construction du frontend puis le serveur.
+
+
+METHODE DEVELOPPEMENT EN DEUX TERMINAUX
+---------------------------------------
+
+Terminal 1 - Backend FastAPI :
+
+  python -m pip install -r requirements.txt
+  python -m uvicorn backend.main:app --reload --port 8000
+
+Terminal 2 - Frontend Vite :
+
+  cd frontend
+  npm install
+  npm run dev
+
+Dans ce mode, le frontend est accessible a l'adresse affichee par Vite,
+souvent :
+
+  http://localhost:5173/
+
+Le backend reste disponible sur :
+
+  http://localhost:8000/
+
+
+NOTES
+-----
+
+- Le fichier data\graph.pkl est deja present dans ce dossier.
+- Si ce fichier manque, lancer :
+
+  python pipeline\build_graph.py
+
+- La documentation technique de l'API est disponible quand le backend tourne :
+
+  http://localhost:8000/docs
+
