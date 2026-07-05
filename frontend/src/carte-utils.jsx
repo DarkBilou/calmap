@@ -1,6 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import L from "leaflet";
 import { TileLayer, useMap, useMapEvents } from "react-leaflet";
+import { composantesScore } from "./couleurs";
 
 // Fond de carte volontairement sobre (CARTO Positron) : la couleur est
 // réservée aux données sensorielles, le fond reste en retrait.
@@ -26,7 +27,9 @@ export function RafraichirTaille({ actif }) {
 
 function appliquerLimiteDezoom(map, limites) {
   const bounds = L.latLngBounds(limites);
-  const minZoom = map.getBoundsZoom(bounds, true);
+  // Le dézoom s'arrête quand la zone de démo tient en entier dans la vue
+  // (inside=false) : on peut voir tout Paris, mais pas le reste du monde.
+  const minZoom = map.getBoundsZoom(bounds, false);
   if (Number.isFinite(minZoom)) {
     map.setMinZoom(minZoom);
     if (map.getZoom() < minZoom) map.setZoom(minZoom, { animate: false });
@@ -35,7 +38,7 @@ function appliquerLimiteDezoom(map, limites) {
   map.panInsideBounds(bounds, { animate: false });
 }
 
-/** Empeche le dezoom d'afficher plus grand que le rectangle modelise. */
+/** Empêche le dézoom d'afficher plus grand que la zone modélisée. */
 export function LimiterDezoomCarte({ actif, limites }) {
   const map = useMap();
 
@@ -67,9 +70,10 @@ export function CentrerSurPoint({ point }) {
   return null;
 }
 
-/** Calcule les limites visibles dans le format attendu par l'API. */
-function bornesVisibles(map) {
-  const bornes = map.getBounds();
+/** Limites à demander à l'API : la vue élargie de 30 %, pour que les petits
+    déplacements restent couverts par la dernière réponse. */
+function bornesAvecMarge(map) {
+  const bornes = map.getBounds().pad(0.3);
   return {
     sud: bornes.getSouth().toFixed(6),
     nord: bornes.getNorth().toFixed(6),
@@ -78,36 +82,122 @@ function bornesVisibles(map) {
   };
 }
 
-/** Remonte les limites visibles pour charger seulement les rues affichees. */
+/** Remonte les limites visibles pour charger seulement les rues affichées.
+    Ne signale un changement que si la vue sort de la zone déjà chargée ou
+    demande plus de détail (zoom avant) : évite un rechargement complet de la
+    heatmap à chaque petit déplacement de la carte. */
 export function SuivreBornesCarte({ actif, onChange }) {
+  const derniereZone = useRef(null); // { bornes: LatLngBounds élargies, zoom }
+
+  function signaler(map) {
+    const visibles = map.getBounds();
+    const zoom = map.getZoom();
+    const d = derniereZone.current;
+    if (d && d.zoom >= zoom && d.bornes.contains(visibles)) return;
+    derniereZone.current = { bornes: visibles.pad(0.3), zoom };
+    onChange(bornesAvecMarge(map));
+  }
+
   const map = useMapEvents({
+    // moveend suffit : Leaflet l'émet aussi à la fin d'un zoom
     moveend: () => {
-      if (actif) onChange(bornesVisibles(map));
-    },
-    zoomend: () => {
-      if (actif) onChange(bornesVisibles(map));
+      if (actif) signaler(map);
     },
   });
 
   useEffect(() => {
-    if (actif) onChange(bornesVisibles(map));
+    if (actif) signaler(map);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [actif, map, onChange]);
 
   return null;
 }
 
 /** Couche GeoJSON geree a la main : recreee quand `donnees` change. */
-export function CoucheGeoJson({ donnees, style, interactive = false }) {
+export function CoucheGeoJson({ donnees, style, pointToLayer, interactive = false }) {
   const map = useMap();
   useEffect(() => {
     if (!donnees) return undefined;
-    const couche = L.geoJSON(donnees, { style, interactive });
+    const couche = L.geoJSON(donnees, { style, pointToLayer, interactive });
     couche.addTo(map);
     return () => {
       map.removeLayer(couche);
     };
-    // `style` est une fonction recréée à chaque rendu : seule la donnée compte
+    // `style` et `pointToLayer` sont recréés à chaque rendu : seule la donnée compte
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [donnees, map]);
+  return null;
+}
+
+const OPACITE_NUAGES = 0.28; // on voit la carte à travers la nappe
+
+/** Image floutée construite à partir des nuages (Points + demi-cellule). */
+function imageNuages(features) {
+  const { demi_lon: demiLon, demi_lat: demiLat } = features[0].properties;
+  const pasLon = 2 * demiLon;
+  const pasLat = 2 * demiLat;
+
+  let lonMin = Infinity, lonMax = -Infinity, latMin = Infinity, latMax = -Infinity;
+  for (const f of features) {
+    const [lon, lat] = f.geometry.coordinates;
+    if (lon < lonMin) lonMin = lon;
+    if (lon > lonMax) lonMax = lon;
+    if (lat < latMin) latMin = lat;
+    if (lat > latMax) latMax = lat;
+  }
+  const colonnes = Math.round((lonMax - lonMin) / pasLon) + 1;
+  const lignes = Math.round((latMax - latMin) / pasLat) + 1;
+
+  // 1 pixel par cellule de la grille, cellules vides transparentes
+  const grille = document.createElement("canvas");
+  grille.width = colonnes;
+  grille.height = lignes;
+  const contexteGrille = grille.getContext("2d");
+  const pixels = contexteGrille.createImageData(colonnes, lignes);
+  for (const f of features) {
+    const [lon, lat] = f.geometry.coordinates;
+    const c = Math.round((lon - lonMin) / pasLon);
+    const r = Math.round((latMax - lat) / pasLat); // l'axe y du canvas descend
+    const [rouge, vert, bleu] = composantesScore(f.properties.score);
+    const o = (r * colonnes + c) * 4;
+    pixels.data[o] = rouge;
+    pixels.data[o + 1] = vert;
+    pixels.data[o + 2] = bleu;
+    pixels.data[o + 3] = Math.round(OPACITE_NUAGES * 255);
+  }
+  contexteGrille.putImageData(pixels, 0, 0);
+
+  // Agrandissement + flou gaussien : les cellules fondent les unes dans les
+  // autres et les bords de la nappe s'estompent en douceur.
+  const echelle = 8;
+  const image = document.createElement("canvas");
+  image.width = colonnes * echelle;
+  image.height = lignes * echelle;
+  const contexte = image.getContext("2d");
+  contexte.filter = `blur(${echelle}px)`;
+  contexte.imageSmoothingEnabled = true;
+  contexte.drawImage(grille, 0, 0, image.width, image.height);
+
+  return {
+    url: image.toDataURL("image/png"),
+    bornes: [
+      [latMin - demiLat, lonMin - demiLon],
+      [latMax + demiLat, lonMax + demiLon],
+    ],
+  };
+}
+
+/** Nappe « nuages » de la vue dézoomée : image floutée posée sur la carte. */
+export function CoucheNuages({ donnees }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!donnees || !donnees.features || donnees.features.length === 0) return undefined;
+    const { url, bornes } = imageNuages(donnees.features);
+    const couche = L.imageOverlay(url, bornes, { interactive: false });
+    couche.addTo(map);
+    return () => {
+      map.removeLayer(couche);
+    };
   }, [donnees, map]);
   return null;
 }

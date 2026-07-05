@@ -17,6 +17,7 @@ import numpy as np
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -33,6 +34,11 @@ DOSSIER_FRONT = RACINE / "frontend" / "dist"
 MARGE_ZONE_DEG = 0.002       # tolérance autour de la zone de démo
 RAYON_QUAND_M = 150.0        # rayon d'analyse autour du point pour /api/quand
 MAX_CACHE_HEATMAP = 64       # cache des scores par heure/profil
+MAX_ARETES_HEATMAP = 20000   # plafond de la réponse heatmap : au-delà (vue large),
+                             # les rues sont agrégées en « nuages » par quartier
+                             # — la zone entière ferait 27 Mo / 145 000 tronçons ;
+                             # 20 000 tronçons gzippés ≈ quelques centaines de Ko
+NUAGES_COLONNES = 40         # finesse de la grille d'agrégation des nuages
 
 # État global chargé une seule fois au démarrage (pas de base de données)
 ETAT: dict[str, Any] = {"graph": None}
@@ -48,6 +54,7 @@ def _precalculer(G: Any) -> None:
     vues: set[tuple[int, int, int]] = set()
     geometries: list[dict[str, Any]] = []
     lden, n_bar, n_marche, n_ecole, n_commerce = [], [], [], [], []
+    longueur: list[float] = []
     mil_lat, mil_lon = [], []
     min_lat, max_lat, min_lon, max_lon = [], [], [], []
 
@@ -64,6 +71,7 @@ def _precalculer(G: Any) -> None:
         geometries.append({"type": "LineString",
                            "coordinates": [[round(x, 6), round(y, 6)] for x, y in pts]})
         lden.append(float(attrs.get("lden", scoring.BRUIT_DEFAUT)))
+        longueur.append(float(attrs.get("length", 0.0)))
         n_bar.append(float(attrs.get("n_bar", 0)))
         n_marche.append(float(attrs.get("n_marche", 0)))
         n_ecole.append(float(attrs.get("n_ecole", 0)))
@@ -78,6 +86,7 @@ def _precalculer(G: Any) -> None:
 
     ETAT.update({
         "geometries": geometries,
+        "longueur": np.array(longueur),
         "lden": np.array(lden),
         "n_bar": np.array(n_bar),
         "n_marche": np.array(n_marche),
@@ -97,6 +106,18 @@ def _precalculer(G: Any) -> None:
     ETAT["bornes"] = (min(ys) - MARGE_ZONE_DEG, max(ys) + MARGE_ZONE_DEG,
                       min(xs) - MARGE_ZONE_DEG, max(xs) + MARGE_ZONE_DEG)
 
+    # La heatmap est découpée en ovale (le « tour de Paris ») plutôt qu'en
+    # rectangle : ellipse inscrite dans les bornes du graphe, avec une petite
+    # marge pour ne pas rogner Issy-les-Moulineaux au bord sud-ouest.
+    centre_lon = (min(xs) + max(xs)) / 2.0
+    centre_lat = (min(ys) + max(ys)) / 2.0
+    demi_lon = (max(xs) - min(xs)) / 2.0
+    demi_lat = (max(ys) - min(ys)) / 2.0
+    ETAT["dans_ovale"] = (
+        ((ETAT["mil_lon"] - centre_lon) / demi_lon) ** 2
+        + ((ETAT["mil_lat"] - centre_lat) / demi_lat) ** 2
+    ) <= 1.05
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -109,6 +130,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     with open(CHEMIN_GRAPHE, "rb") as f:
         ETAT["graph"] = pickle.load(f)
     _precalculer(ETAT["graph"])
+    ETAT["routage"] = routing.preparer_routage(ETAT["graph"])
     print(f"✅ Graphe chargé : {ETAT['graph'].number_of_edges()} arêtes "
           f"(bruit : {ETAT['graph'].graph.get('bruit_source', 'synthetique')})")
     yield
@@ -120,6 +142,8 @@ app = FastAPI(title="Calmap API", description="Météo sensorielle & itinéraire
 # CORS ouvert : le frontend tourne sur un autre port en développement
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"],
                    allow_headers=["*"])
+# Les réponses heatmap font plusieurs Mo de JSON : le gzip les divise par ~5
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -205,6 +229,58 @@ def _indices_bbox(sud: Optional[float], nord: Optional[float],
     return np.nonzero(masque)[0]
 
 
+def _nuages(indices: np.ndarray, scores: np.ndarray, sud: float, nord: float,
+            ouest: float, est: float) -> list[dict[str, Any]]:
+    """Agrège les arêtes en « nuages » par cellule de grille (vue dézoomée).
+
+    Chaque nuage est un Point (centre de cellule) avec la demi-taille de la
+    cellule : le frontend dessine des pavés transparents exactement jointifs,
+    qui forment une nappe uniforme colorée par le score moyen (pondéré par la
+    longueur des rues) du quartier. Bien plus léger que 145 000 tronçons.
+    """
+    lats = ETAT["mil_lat"][indices]
+    lons = ETAT["mil_lon"][indices]
+    poids = np.maximum(ETAT["longueur"][indices], 1.0)  # pondération par longueur
+
+    lat_moyenne = (sud + nord) / 2.0
+    cos_lat = math.cos(math.radians(lat_moyenne))
+    pas_lon = max((est - ouest) / NUAGES_COLONNES, 1e-6)
+    pas_lat = pas_lon * cos_lat  # cellules ~carrées en mètres
+    n_lignes = max(1, int(math.ceil((nord - sud) / pas_lat)))
+
+    colonnes = np.clip(((lons - ouest) / pas_lon).astype(int), 0, NUAGES_COLONNES - 1)
+    lignes = np.clip(((lats - sud) / pas_lat).astype(int), 0, n_lignes - 1)
+    cellules = lignes * NUAGES_COLONNES + colonnes
+    n_cellules = n_lignes * NUAGES_COLONNES
+
+    somme_poids = np.bincount(cellules, weights=poids, minlength=n_cellules)
+    somme_scores = np.bincount(cellules, weights=scores[indices] * poids,
+                               minlength=n_cellules)
+    somme_lden = np.bincount(cellules, weights=ETAT["lden"][indices] * poids,
+                             minlength=n_cellules)
+
+    demi_lon = round(pas_lon / 2.0, 6)
+    demi_lat = round(pas_lat / 2.0, 6)
+
+    features = []
+    for cellule in np.nonzero(somme_poids > 0)[0]:
+        ligne, colonne = divmod(int(cellule), NUAGES_COLONNES)
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point",
+                         "coordinates": [round(ouest + (colonne + 0.5) * pas_lon, 6),
+                                         round(sud + (ligne + 0.5) * pas_lat, 6)]},
+            "properties": {
+                "score": float(round(somme_scores[cellule] / somme_poids[cellule], 3)),
+                "lden": float(round(somme_lden[cellule] / somme_poids[cellule], 1)),
+                "nuage": True,
+                "demi_lon": demi_lon,
+                "demi_lat": demi_lat,
+            },
+        })
+    return features
+
+
 def _haversine_m(lats: np.ndarray, lons: np.ndarray, lat: float,
                  lon: float) -> np.ndarray:
     """Distance haversine (m) entre chaque point des tableaux et (lat, lon)."""
@@ -247,7 +323,8 @@ def api_route(from_lat: float, from_lon: float, to_lat: float, to_lon: float,
 
     profil = {"bruit": poids_bruit, "foule": poids_foule}
     try:
-        return routing.calculer_itineraires(ETAT["graph"], from_lat, from_lon,
+        return routing.calculer_itineraires(ETAT["graph"], ETAT["routage"],
+                                            from_lat, from_lon,
                                             to_lat, to_lon, heure, profil, beta)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -264,6 +341,18 @@ def api_heatmap(heure: int = 14, poids_bruit: float = 0.5,
 
     scores = _scores_heatmap(heure, poids_bruit, poids_foule)
     indices = _indices_bbox(sud, nord, ouest, est)
+    indices = indices[ETAT["dans_ovale"][indices]]  # découpe ovale autour de Paris
+
+    # Vue large : agrégation en nuages transparents par quartier, sinon le
+    # navigateur gèlerait à dessiner 145 000 tronçons de rue.
+    if len(indices) > MAX_ARETES_HEATMAP:
+        lat_min, lat_max, lon_min, lon_max = ETAT["bornes"]
+        return {"type": "FeatureCollection",
+                "features": _nuages(indices, scores,
+                                    sud if sud is not None else lat_min,
+                                    nord if nord is not None else lat_max,
+                                    ouest if ouest is not None else lon_min,
+                                    est if est is not None else lon_max)}
 
     features = []
     for indice_brut in indices:

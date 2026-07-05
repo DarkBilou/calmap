@@ -3,17 +3,28 @@
 Coût d'une arête pour l'itinéraire calme :
     cout(e) = length * (1 + beta * S(e, h, p))
 L'itinéraire rapide est pondéré par la longueur seule.
+
+Le plus court chemin passe par scipy (Dijkstra compilé sur matrice creuse) :
+les arêtes sont pré-compilées en tableaux numpy par preparer_routage(), appelé
+une fois au démarrage. Un Dijkstra networkx avec fonction de coût Python
+prenait ~3 s par itinéraire sur les 350 000 arêtes de la zone.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Callable
 
 import networkx as nx
-import osmnx as ox
+import numpy as np
+from scipy.sparse import csr_matrix
+from scipy.sparse.csgraph import dijkstra
+from scipy.spatial import cKDTree
 
 try:  # lancement depuis la racine du repo (uvicorn backend.main:app)
+    from backend import scoring
     from backend.scoring import Profil, confiance_arete, score_arete
 except ImportError:  # lancement depuis backend/ (uvicorn main:app)
+    import scoring  # type: ignore
     from scoring import Profil, confiance_arete, score_arete  # type: ignore
 
 VITESSE_MARCHE_KMH = 4.5  # vitesse de marche pour convertir distance → durée
@@ -36,18 +47,84 @@ def coords_arete(G: nx.MultiDiGraph, u: int, v: int,
     return [(G.nodes[u]["x"], G.nodes[u]["y"]), (G.nodes[v]["x"], G.nodes[v]["y"])]
 
 
-def _plus_court_chemin(G: nx.MultiDiGraph, orig: int, dest: int,
-                       cout: Cout) -> list[int]:
-    """Plus court chemin (liste de nœuds) selon la fonction de coût donnée."""
-    def poids(u: int, v: int, d: dict) -> float:
-        # MultiDiGraph : d = {clé: attributs} des arêtes parallèles u→v,
-        # on retient la moins coûteuse
-        return min(cout(attrs) for attrs in d.values())
+def preparer_routage(G: nx.MultiDiGraph) -> dict[str, Any]:
+    """Pré-compile le graphe en tableaux numpy pour le Dijkstra scipy.
 
-    try:
-        return nx.shortest_path(G, orig, dest, weight=poids)
-    except (nx.NetworkXNoPath, nx.NodeNotFound) as exc:
-        raise ValueError("aucun itinéraire piéton trouvé entre ces deux points") from exc
+    Les arêtes parallèles u→v sont regroupées (ordre + debuts) pour retenir,
+    à chaque requête, la moins coûteuse via np.minimum.reduceat.
+    """
+    noeuds = np.array(list(G.nodes))
+    index = {int(n): i for i, n in enumerate(noeuds)}
+    xs = np.array([G.nodes[n]["x"] for n in noeuds], dtype=float)
+    ys = np.array([G.nodes[n]["y"] for n in noeuds], dtype=float)
+
+    # KD-tree en degrés « aplatis » : longitude corrigée par cos(latitude)
+    cos_lat = math.cos(math.radians(float(ys.mean())))
+    arbre = cKDTree(np.column_stack((xs * cos_lat, ys)))
+
+    n_aretes = G.number_of_edges()
+    ui = np.empty(n_aretes, dtype=np.int32)
+    vi = np.empty(n_aretes, dtype=np.int32)
+    longueur = np.empty(n_aretes)
+    lden = np.empty(n_aretes)
+    n_bar = np.empty(n_aretes)
+    n_marche = np.empty(n_aretes)
+    n_ecole = np.empty(n_aretes)
+    n_commerce = np.empty(n_aretes)
+    for i, (u, v, attrs) in enumerate(G.edges(data=True)):
+        ui[i] = index[u]
+        vi[i] = index[v]
+        longueur[i] = float(attrs.get("length", 1.0))
+        lden[i] = float(attrs.get("lden", scoring.BRUIT_DEFAUT))
+        n_bar[i] = float(attrs.get("n_bar", 0))
+        n_marche[i] = float(attrs.get("n_marche", 0))
+        n_ecole[i] = float(attrs.get("n_ecole", 0))
+        n_commerce[i] = float(attrs.get("n_commerce", 0))
+
+    # Regroupement des arêtes parallèles : une entrée par couple (u, v)
+    ordre = np.lexsort((vi, ui))
+    ui_trie, vi_trie = ui[ordre], vi[ordre]
+    nouveaux = np.ones(n_aretes, dtype=bool)
+    nouveaux[1:] = (ui_trie[1:] != ui_trie[:-1]) | (vi_trie[1:] != vi_trie[:-1])
+    debuts = np.nonzero(nouveaux)[0]
+
+    prep = {
+        "noeuds": noeuds, "arbre": arbre, "cos_lat": cos_lat,
+        "longueur": longueur, "lden": lden, "n_bar": n_bar,
+        "n_marche": n_marche, "n_ecole": n_ecole, "n_commerce": n_commerce,
+        "ordre": ordre, "debuts": debuts,
+        "lignes": ui_trie[debuts], "colonnes": vi_trie[debuts],
+        "n_noeuds": len(noeuds),
+    }
+    prep["csr_rapide"] = _matrice_couts(prep, longueur)  # statique : pré-construite
+    return prep
+
+
+def _matrice_couts(prep: dict[str, Any], poids: np.ndarray) -> csr_matrix:
+    """Matrice creuse des coûts, arêtes parallèles réduites à la moins chère."""
+    minima = np.minimum.reduceat(poids[prep["ordre"]], prep["debuts"])
+    return csr_matrix((minima, (prep["lignes"], prep["colonnes"])),
+                      shape=(prep["n_noeuds"], prep["n_noeuds"]))
+
+
+def _noeud_le_plus_proche(prep: dict[str, Any], lat: float, lon: float) -> int:
+    """Indice (interne) du nœud du graphe le plus proche du point demandé."""
+    _, indice = prep["arbre"].query([lon * prep["cos_lat"], lat])
+    return int(indice)
+
+
+def _plus_court_chemin(prep: dict[str, Any], matrice: csr_matrix,
+                       orig: int, dest: int) -> list[int]:
+    """Plus court chemin (liste de nœuds du graphe) via Dijkstra scipy."""
+    distances, predecesseurs = dijkstra(matrice, directed=True, indices=orig,
+                                        return_predecessors=True)
+    if not np.isfinite(distances[dest]):
+        raise ValueError("aucun itinéraire piéton trouvé entre ces deux points")
+    chemin_indices = [dest]
+    while chemin_indices[-1] != orig:
+        chemin_indices.append(int(predecesseurs[chemin_indices[-1]]))
+    noeuds = prep["noeuds"]
+    return [int(noeuds[i]) for i in reversed(chemin_indices)]
 
 
 def _resume_chemin(G: nx.MultiDiGraph, chemin: list[int], heure: int,
@@ -80,16 +157,16 @@ def _feature(coords: list[tuple[float, float]],
     }
 
 
-def calculer_itineraires(G: nx.MultiDiGraph, from_lat: float, from_lon: float,
+def calculer_itineraires(G: nx.MultiDiGraph, prep: dict[str, Any],
+                         from_lat: float, from_lon: float,
                          to_lat: float, to_lon: float, heure: int, profil: Profil,
                          beta: float = 3.0, jour_semaine: int = 0) -> dict[str, Any]:
     """Calcule les itinéraires rapide et calme, au format du contrat d'API.
 
     Lève ValueError (→ HTTP 400 côté API) si aucun itinéraire n'est possible.
     """
-    # Snapping : nœud du graphe le plus proche de chaque point demandé
-    orig = int(ox.distance.nearest_nodes(G, X=from_lon, Y=from_lat))
-    dest = int(ox.distance.nearest_nodes(G, X=to_lon, Y=to_lat))
+    orig = _noeud_le_plus_proche(prep, from_lat, from_lon)
+    dest = _noeud_le_plus_proche(prep, to_lat, to_lon)
     if orig == dest:
         raise ValueError("départ et arrivée trop proches : ils tombent sur le même "
                          "nœud du graphe")
@@ -101,9 +178,14 @@ def calculer_itineraires(G: nx.MultiDiGraph, from_lat: float, from_lon: float,
         return float(attrs.get("length", 1.0)) \
             * (1.0 + beta * score_arete(attrs, heure, profil, jour_semaine))
 
-    rapide = _resume_chemin(G, _plus_court_chemin(G, orig, dest, cout_rapide),
+    scores = scoring.score(prep["lden"], prep["n_bar"], prep["n_marche"],
+                           prep["n_ecole"], prep["n_commerce"], heure, profil,
+                           jour_semaine)
+    matrice_calme = _matrice_couts(prep, prep["longueur"] * (1.0 + beta * scores))
+
+    rapide = _resume_chemin(G, _plus_court_chemin(prep, prep["csr_rapide"], orig, dest),
                             heure, profil, cout_rapide, jour_semaine)
-    calme = _resume_chemin(G, _plus_court_chemin(G, orig, dest, cout_calme),
+    calme = _resume_chemin(G, _plus_court_chemin(prep, matrice_calme, orig, dest),
                            heure, profil, cout_calme, jour_semaine)
 
     delta_duree = calme["duree_min"] - rapide["duree_min"]
