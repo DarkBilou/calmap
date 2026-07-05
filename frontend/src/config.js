@@ -11,10 +11,5 @@ export const LIMITES_DEMO = [
   [48.902, 2.47],
 ];
 
-// Recherche d'adresse sans cle API via Nominatim, avec une preference autour
-// de Paris + Issy-les-Moulineaux.
-export const NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search";
-export const NOMINATIM_VIEWBOX = "2.220,48.902,2.470,48.805";
-
 // Couleur d'accent unique de l'interface (voir CLAUDE.md, principes de design).
 export const ACCENT = "#2A9D8F";

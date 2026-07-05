@@ -30,9 +30,11 @@ invalides ou point hors zone. Le serveur ne crashe jamais.
 | Endpoint | Paramètres | Réponse |
 |---|---|---|
 | `GET /api/health` | — | `{status, graph_loaded, edges, bruit_source: "reel"\|"synthetique"}` |
-| `GET /api/heatmap` | `heure` 0-23, `poids_bruit` 0-1, `poids_foule` 0-1, `sud/nord/ouest/est` optionnels | FeatureCollection, `properties: {score, lden}` ; rues (LineString) découpées en ovale autour de Paris ; au-delà de 20 000 tronçons visibles (vue large), « nuages » agrégés par quartier (Point + `nuage: true`, `demi_lat`/`demi_lon`) rendus côté client en une image floutée transparente (fondu continu) ; réponses gzippées ; scores caches par heure/profil |
+| `GET /api/heatmap` | `heure` 0-23, `poids_bruit` 0-1, `poids_foule` 0-1, `sud/nord/ouest/est` optionnels | FeatureCollection, `properties: {score, lden}` ; rues (LineString) sur toute la zone ; au-delà de 20 000 tronçons visibles (vue large), « nuages » agrégés par quartier (Point + `nuage: true`, `demi_lat`/`demi_lon`) rendus côté client en une image floutée transparente (fondu continu) ; réponses gzippées ; scores caches par heure/profil |
 | `GET /api/route` | `from_lat/lon`, `to_lat/lon`, `heure`, `poids_bruit`, `poids_foule`, `beta` | `{rapide: {geojson, distance_m, duree_min, exposition}, calme: {idem + delta_duree_min, delta_exposition_pct}, confiance}` |
 | `GET /api/quand` | `lat`, `lon`, `poids_bruit`, `poids_foule` | `{scores_horaires: [{heure, score}×24], creneau_optimal: {debut, fin}}` (rues < 150 m, créneau 2 h entre 8 h et 21 h) |
+| `GET /api/adresses` | `q` (≥ 3 caractères, sinon `[]`) | `[{id, label, lat, lng}]` — proxy Nominatim côté serveur (timeout 5 s, 503 si indisponible) ; le navigateur ne doit PAS appeler Nominatim en direct (blocages/limites de débit) |
+| `GET /api/adresse-inverse` | `lat`, `lon` (dans la zone, sinon 400) | `{label}` court (« 10 Rue X, Paris ») — proxy Nominatim reverse (timeout 5 s, 503 si indisponible) ; remplit les champs après un tap sur la carte |
 
 `confiance` : 0,9 = bruit mesuré (Bruitparif), 0,5 = synthétique. Si
 `bruit_source = "synthetique"`, le frontend affiche le bandeau « Démo : bruit simulé ».
@@ -42,7 +44,8 @@ invalides ou point hors zone. Le serveur ne crashe jamais.
 1. **Carte** : heatmap (`/api/heatmap`) recolorée selon curseur horaire 0-23 h ;
    mode itinéraire à 2 taps → `/api/route` → tracé rapide (gris pointillé) +
    calme (vert épais) + bottom sheet comparatif (Δ durée, Δ exposition, badge fiabilité).
-2. **Quand y aller** : tap sur mini-carte → `/api/quand` → histogramme 24 barres
+2. **Quand y aller** : mini-carte avec heatmap d'ambiance (heure actuelle, via
+   `CoucheHeatmapAuto`, erreurs silencieuses) ; tap → `/api/quand` → histogramme 24 barres
    fait main (divs CSS, pas de lib de charts), créneau optimal surligné (même
    s'il est passé), heures passées grisées, valeurs exactes dans un `<details>`.
 3. **Mon profil** : curseurs Bruit (défaut 70) / Foule (défaut 50), bascule

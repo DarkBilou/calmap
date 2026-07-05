@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, AsyncIterator, Optional
 
 import numpy as np
+import requests
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -105,18 +106,6 @@ def _precalculer(G: Any) -> None:
     ys = [d["y"] for _, d in G.nodes(data=True)]
     ETAT["bornes"] = (min(ys) - MARGE_ZONE_DEG, max(ys) + MARGE_ZONE_DEG,
                       min(xs) - MARGE_ZONE_DEG, max(xs) + MARGE_ZONE_DEG)
-
-    # La heatmap est découpée en ovale (le « tour de Paris ») plutôt qu'en
-    # rectangle : ellipse inscrite dans les bornes du graphe, avec une petite
-    # marge pour ne pas rogner Issy-les-Moulineaux au bord sud-ouest.
-    centre_lon = (min(xs) + max(xs)) / 2.0
-    centre_lat = (min(ys) + max(ys)) / 2.0
-    demi_lon = (max(xs) - min(xs)) / 2.0
-    demi_lat = (max(ys) - min(ys)) / 2.0
-    ETAT["dans_ovale"] = (
-        ((ETAT["mil_lon"] - centre_lon) / demi_lon) ** 2
-        + ((ETAT["mil_lat"] - centre_lat) / demi_lat) ** 2
-    ) <= 1.05
 
 
 @asynccontextmanager
@@ -234,9 +223,11 @@ def _nuages(indices: np.ndarray, scores: np.ndarray, sud: float, nord: float,
     """Agrège les arêtes en « nuages » par cellule de grille (vue dézoomée).
 
     Chaque nuage est un Point (centre de cellule) avec la demi-taille de la
-    cellule : le frontend dessine des pavés transparents exactement jointifs,
-    qui forment une nappe uniforme colorée par le score moyen (pondéré par la
-    longueur des rues) du quartier. Bien plus léger que 145 000 tronçons.
+    cellule : le frontend en fait une image floutée, nappe continue colorée
+    par le score moyen (pondéré par la longueur des rues) du quartier. Bien
+    plus léger que 145 000 tronçons. Les cellules sans rue (hors de la zone
+    modélisée) héritent de la couleur de leurs voisines par diffusion : la
+    nappe couvre ainsi tout le rectangle demandé, donc toute la carte.
     """
     lats = ETAT["mil_lat"][indices]
     lons = ETAT["mil_lon"][indices]
@@ -259,26 +250,67 @@ def _nuages(indices: np.ndarray, scores: np.ndarray, sud: float, nord: float,
     somme_lden = np.bincount(cellules, weights=ETAT["lden"][indices] * poids,
                              minlength=n_cellules)
 
+    if not np.any(somme_poids > 0):
+        return []
+
+    occupees = somme_poids > 0
+    score_grille = np.full(n_cellules, np.nan)
+    lden_grille = np.full(n_cellules, np.nan)
+    score_grille[occupees] = somme_scores[occupees] / somme_poids[occupees]
+    lden_grille[occupees] = somme_lden[occupees] / somme_poids[occupees]
+    score_grille = _remplir_vides(score_grille.reshape(n_lignes, NUAGES_COLONNES)).ravel()
+    lden_grille = _remplir_vides(lden_grille.reshape(n_lignes, NUAGES_COLONNES)).ravel()
+
     demi_lon = round(pas_lon / 2.0, 6)
     demi_lat = round(pas_lat / 2.0, 6)
 
     features = []
-    for cellule in np.nonzero(somme_poids > 0)[0]:
-        ligne, colonne = divmod(int(cellule), NUAGES_COLONNES)
+    for cellule in range(n_cellules):
+        ligne, colonne = divmod(cellule, NUAGES_COLONNES)
         features.append({
             "type": "Feature",
             "geometry": {"type": "Point",
                          "coordinates": [round(ouest + (colonne + 0.5) * pas_lon, 6),
                                          round(sud + (ligne + 0.5) * pas_lat, 6)]},
             "properties": {
-                "score": float(round(somme_scores[cellule] / somme_poids[cellule], 3)),
-                "lden": float(round(somme_lden[cellule] / somme_poids[cellule], 1)),
+                "score": float(round(score_grille[cellule], 3)),
+                "lden": float(round(lden_grille[cellule], 1)),
                 "nuage": True,
                 "demi_lon": demi_lon,
                 "demi_lat": demi_lat,
             },
         })
     return features
+
+
+def _remplir_vides(grille: np.ndarray) -> np.ndarray:
+    """Propage les valeurs vers les cellules vides (NaN) depuis leurs voisines.
+
+    Diffusion couche par couche (moyenne des 4 voisines connues) : les couleurs
+    du bord de la zone modélisée se prolongent en douceur vers l'extérieur.
+    """
+    while np.isnan(grille).any():
+        somme = np.zeros(grille.shape)
+        compte = np.zeros(grille.shape)
+        for axe, sens in ((0, 1), (0, -1), (1, 1), (1, -1)):
+            voisine = np.roll(grille, sens, axis=axe)
+            # np.roll boucle sur les bords : on neutralise la rangée revenue
+            if axe == 0 and sens == 1:
+                voisine[0, :] = np.nan
+            elif axe == 0:
+                voisine[-1, :] = np.nan
+            elif sens == 1:
+                voisine[:, 0] = np.nan
+            else:
+                voisine[:, -1] = np.nan
+            connue = ~np.isnan(voisine)
+            somme[connue] += voisine[connue]
+            compte[connue] += 1
+        a_remplir = np.isnan(grille) & (compte > 0)
+        if not a_remplir.any():
+            break  # sécurité : ne devrait pas arriver sur une grille connexe
+        grille[a_remplir] = somme[a_remplir] / compte[a_remplir]
+    return grille
 
 
 def _haversine_m(lats: np.ndarray, lons: np.ndarray, lat: float,
@@ -341,7 +373,6 @@ def api_heatmap(heure: int = 14, poids_bruit: float = 0.5,
 
     scores = _scores_heatmap(heure, poids_bruit, poids_foule)
     indices = _indices_bbox(sud, nord, ouest, est)
-    indices = indices[ETAT["dans_ovale"][indices]]  # découpe ovale autour de Paris
 
     # Vue large : agrégation en nuages transparents par quartier, sinon le
     # navigateur gèlerait à dessiner 145 000 tronçons de rue.
@@ -397,6 +428,85 @@ def api_quand(lat: float, lon: float, poids_bruit: float = 0.5,
 
     return {"scores_horaires": scores_horaires,
             "creneau_optimal": {"debut": meilleur_debut, "fin": meilleur_debut + 2}}
+
+
+NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
+NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
+
+
+@app.get("/api/adresses")
+def api_adresses(q: str = "") -> list[dict[str, Any]]:
+    """Recherche d'adresse : proxy Nominatim côté serveur.
+
+    Le navigateur appelait Nominatim en direct : blocages réseau et limites de
+    débit le faisaient parfois attendre indéfiniment. Ici : User-Agent propre,
+    timeout court, et réponse simplifiée [{id, label, lat, lng}].
+    """
+    q = q.strip()
+    if len(q) < 3:
+        return []
+    lat_min, lat_max, lon_min, lon_max = ETAT["bornes"]
+    try:
+        reponse = requests.get(
+            NOMINATIM_URL,
+            params={"format": "jsonv2", "q": q, "limit": 5, "addressdetails": 1,
+                    "accept-language": "fr", "countrycodes": "fr",
+                    "viewbox": f"{lon_min},{lat_max},{lon_max},{lat_min}",
+                    "bounded": 1},
+            headers={"User-Agent": "calmap-demo (hackathon Hi! PARIS)"},
+            timeout=5,
+        )
+        reponse.raise_for_status()
+        lieux = reponse.json()
+    except Exception as exc:  # réseau, timeout, JSON invalide…
+        raise HTTPException(status_code=503,
+                            detail="recherche d'adresse indisponible pour le moment") from exc
+
+    resultats = []
+    for lieu in lieux:
+        try:
+            resultats.append({
+                "id": lieu.get("place_id") or f"{lieu.get('osm_type')}-{lieu.get('osm_id')}",
+                "label": str(lieu["display_name"]),
+                "lat": float(lieu["lat"]),
+                "lng": float(lieu["lon"]),
+            })
+        except (KeyError, TypeError, ValueError):
+            continue  # entrée incomplète : on l'ignore
+    return resultats
+
+
+@app.get("/api/adresse-inverse")
+def api_adresse_inverse(lat: float, lon: float) -> dict[str, Any]:
+    """Adresse la plus proche d'un point (proxy Nominatim reverse).
+
+    Renvoie un libellé court et calme (« 10 Rue Oberkampf, Paris ») plutôt que
+    le display_name complet, trop long pour les champs de recherche.
+    """
+    _valider_point(lat, lon, "point")
+    try:
+        reponse = requests.get(
+            NOMINATIM_REVERSE_URL,
+            params={"format": "jsonv2", "lat": lat, "lon": lon, "zoom": 18,
+                    "accept-language": "fr"},
+            headers={"User-Agent": "calmap-demo (hackathon Hi! PARIS)"},
+            timeout=5,
+        )
+        reponse.raise_for_status()
+        lieu = reponse.json()
+    except Exception as exc:  # réseau, timeout, JSON invalide…
+        raise HTTPException(status_code=503,
+                            detail="adresse introuvable pour le moment") from exc
+
+    adresse = lieu.get("address") or {}
+    rue = " ".join(partie for partie in (
+        adresse.get("house_number"),
+        adresse.get("road") or adresse.get("pedestrian") or adresse.get("footway"),
+    ) if partie)
+    ville = adresse.get("city") or adresse.get("town") or adresse.get("municipality") or ""
+    label = ", ".join(partie for partie in (rue, ville) if partie) \
+        or str(lieu.get("display_name") or "")
+    return {"label": label}
 
 
 # Frontend buildé servi sur "/" s'il existe (ignoré silencieusement sinon).

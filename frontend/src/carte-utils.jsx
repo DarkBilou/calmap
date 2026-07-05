@@ -1,7 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import { TileLayer, useMap, useMapEvents } from "react-leaflet";
-import { composantesScore } from "./couleurs";
+import { appelApi } from "./api";
+import { composantesScore, couleurScore } from "./couleurs";
 
 // Fond de carte volontairement sobre (CARTO Positron) : la couleur est
 // réservée aux données sensorielles, le fond reste en retrait.
@@ -200,6 +201,51 @@ export function CoucheNuages({ donnees }) {
     };
   }, [donnees, map]);
   return null;
+}
+
+function styleRuesHeatmap(feature) {
+  return { color: couleurScore(feature.properties.score), weight: 3, opacity: 0.75 };
+}
+
+/** Heatmap autonome : suit la vue de la carte, charge /api/heatmap et bascule
+    d'elle-même entre nuages (vue large) et rues (vue rapprochée). Couche
+    d'ambiance : en cas d'erreur réseau elle disparaît sans message, l'onglet
+    hôte garde ses propres messages calmes. */
+export function CoucheHeatmapAuto({ actif, heure, poidsBruit, poidsFoule }) {
+  const [donnees, setDonnees] = useState(null);
+  const [bornes, setBornes] = useState(null);
+
+  useEffect(() => {
+    if (!bornes) return undefined;
+    const controleur = new AbortController();
+    const minuterie = setTimeout(() => {
+      appelApi(
+        "/api/heatmap",
+        { heure, poids_bruit: poidsBruit, poids_foule: poidsFoule, ...bornes },
+        { signal: controleur.signal }
+      )
+        .then((reponse) => {
+          if (!controleur.signal.aborted) setDonnees(reponse);
+        })
+        .catch(() => {
+          // couche décorative : pas de message dédié
+        });
+    }, 250);
+    return () => {
+      clearTimeout(minuterie);
+      controleur.abort();
+    };
+  }, [heure, poidsBruit, poidsFoule, bornes]);
+
+  const enNuages = Boolean(donnees?.features?.[0]?.properties?.nuage);
+  return (
+    <>
+      <SuivreBornesCarte actif={actif} onChange={setBornes} />
+      {enNuages
+        ? <CoucheNuages donnees={donnees} />
+        : <CoucheGeoJson donnees={donnees} style={styleRuesHeatmap} />}
+    </>
+  );
 }
 
 /** Remonte les taps sur la carte (latlng Leaflet). */

@@ -1,4 +1,4 @@
-import { API_BASE_URL, NOMINATIM_SEARCH_URL, NOMINATIM_VIEWBOX } from "./config";
+import { API_BASE_URL } from "./config";
 
 /**
  * Appelle l'API Calmap et renvoie le JSON, ou lève une Error au message
@@ -34,19 +34,15 @@ export async function appelApi(chemin, params = {}, { signal } = {}) {
   return reponse.json();
 }
 
+// La recherche passe par notre backend (/api/adresses, proxy Nominatim avec
+// timeout court) : l'appel direct du navigateur vers Nominatim restait parfois
+// suspendu sans réponse (limite de débit, réseau filtré).
 export async function rechercherAdresses(texte, { signal } = {}) {
   const requete = texte.trim();
   if (requete.length < 3) return [];
 
-  const url = new URL(NOMINATIM_SEARCH_URL);
-  url.searchParams.set("format", "jsonv2");
+  const url = new URL(`${API_BASE_URL}/api/adresses`, window.location.origin);
   url.searchParams.set("q", requete);
-  url.searchParams.set("limit", "5");
-  url.searchParams.set("addressdetails", "1");
-  url.searchParams.set("accept-language", "fr");
-  url.searchParams.set("countrycodes", "fr");
-  url.searchParams.set("viewbox", NOMINATIM_VIEWBOX);
-  url.searchParams.set("bounded", "1");
 
   let reponse;
   try {
@@ -60,15 +56,7 @@ export async function rechercherAdresses(texte, { signal } = {}) {
     throw new Error("Recherche indisponible pour le moment");
   }
 
-  const donnees = await reponse.json();
-  return donnees
-    .map((lieu) => ({
-      id: lieu.place_id ?? `${lieu.osm_type}-${lieu.osm_id}`,
-      label: lieu.display_name,
-      lat: Number(lieu.lat),
-      lng: Number(lieu.lon),
-    }))
-    .filter((lieu) => lieu.label && Number.isFinite(lieu.lat) && Number.isFinite(lieu.lng));
+  return reponse.json();
 }
 
 function premiereMajuscule(texte) {

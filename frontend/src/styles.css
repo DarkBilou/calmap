@@ -161,6 +161,18 @@ h2 {
   opacity: 0.55;
 }
 
+/* Bouton plein grisé tant que l'action n'est pas possible */
+.bouton-plein:disabled {
+  background: #dde3e0;
+  border-color: #dde3e0;
+  color: #52606d;
+  opacity: 1;
+}
+
+.bouton-rechercher {
+  flex: 1;
+}
+
 .rang-boutons {
   display: flex;
   gap: 10px;

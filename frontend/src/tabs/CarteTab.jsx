@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MapContainer, CircleMarker } from "react-leaflet";
 import { appelApi } from "../api";
 import { useProfil, poidsApi } from "../profil";
@@ -64,12 +64,16 @@ export default function CarteTab({ actif }) {
   const [bornesCarte, setBornesCarte] = useState(null);
 
   const [menuCarteOuvert, setMenuCarteOuvert] = useState(false);
-  const [modeItineraire, setModeItineraire] = useState(true);
   const [pointAPlacer, setPointAPlacer] = useState("depart");
   const [depart, setDepart] = useState(null);
   const [arrivee, setArrivee] = useState(null);
   const [texteDepart, setTexteDepart] = useState("");
   const [texteArrivee, setTexteArrivee] = useState("");
+  // Libellés remplis automatiquement (adresse du point tapé sur la carte) :
+  // mémorisés pour ne pas déclencher la recherche de suggestions dessus.
+  const [adresseAutoDepart, setAdresseAutoDepart] = useState("");
+  const [adresseAutoArrivee, setAdresseAutoArrivee] = useState("");
+  const compteurAdresse = useRef({ depart: 0, arrivee: 0 });
   const [pointRecentre, setPointRecentre] = useState(null);
   const [route, setRoute] = useState(null);
   const [calculEnCours, setCalculEnCours] = useState(false);
@@ -141,31 +145,52 @@ export default function CarteTab({ actif }) {
     setArrivee(null);
     setTexteDepart("");
     setTexteArrivee("");
+    setAdresseAutoDepart("");
+    setAdresseAutoArrivee("");
     setPointRecentre(null);
     setRoute(null);
     setErreurRoute("");
     setPointAPlacer("depart");
   }
 
-  function basculerMode() {
-    if (modeItineraire) effacer();
-    else setPointAPlacer(!depart ? "depart" : "arrivee");
-    setModeItineraire(!modeItineraire);
+  // Remplace « Point choisi sur la carte » par l'adresse du lieu tapé, dès
+  // que le géocodage inverse répond. En cas d'échec, le texte neutre reste.
+  function remplirAdresse(champ, latlng) {
+    const numero = ++compteurAdresse.current[champ];
+    appelApi("/api/adresse-inverse", {
+      lat: latlng.lat.toFixed(6),
+      lon: latlng.lng.toFixed(6),
+    })
+      .then((reponse) => {
+        // on ignore la réponse si un tap plus récent a déplacé ce point
+        if (!reponse.label || compteurAdresse.current[champ] !== numero) return;
+        if (champ === "depart") {
+          setAdresseAutoDepart(reponse.label);
+          setTexteDepart(reponse.label);
+        } else {
+          setAdresseAutoArrivee(reponse.label);
+          setTexteArrivee(reponse.label);
+        }
+      })
+      .catch(() => {
+        // adresse introuvable : le libellé neutre suffit
+      });
   }
 
   function clicCarte(latlng) {
-    if (!modeItineraire) setModeItineraire(true);
     setErreurRoute("");
     if (pointAPlacer === "depart" || !depart) {
       setDepart(latlng);
       setTexteDepart(TEXTE_POINT_CARTE);
       setRoute(null);
       setPointAPlacer("arrivee");
+      remplirAdresse("depart", latlng);
     } else {
       setArrivee(latlng);
       setTexteArrivee(TEXTE_POINT_CARTE);
       setRoute(null);
       setPointAPlacer("depart");
+      remplirAdresse("arrivee", latlng);
     }
   }
 
@@ -191,7 +216,6 @@ export default function CarteTab({ actif }) {
 
   function choisirAdresse(typePoint, suggestion) {
     const point = { lat: suggestion.lat, lng: suggestion.lng };
-    setModeItineraire(true);
     setErreurRoute("");
     setRoute(null);
     setPointRecentre(point);
@@ -207,11 +231,9 @@ export default function CarteTab({ actif }) {
   }
 
   let indice = "";
-  if (modeItineraire) {
-    if (pointAPlacer === "depart") indice = depart ? "Touche la carte pour déplacer le départ." : "Touche la carte : point de départ.";
-    else if (!arrivee) indice = "Touche la carte : point d'arrivée.";
-    else if (calculEnCours) indice = "Calcul de l'itinéraire…";
-  }
+  if (pointAPlacer === "depart") indice = depart ? "Touche la carte pour déplacer le départ." : "Touche la carte : point de départ.";
+  else if (!arrivee) indice = "Touche la carte : point d'arrivée.";
+  else if (calculEnCours) indice = "Calcul de l'itinéraire…";
 
   let resumeMenu = "Recherche et itinéraire";
   if (calculEnCours) resumeMenu = "Calcul en cours";
@@ -280,7 +302,8 @@ export default function CarteTab({ actif }) {
                   onChange={changerTexteDepart}
                   onChoisir={(suggestion) => choisirAdresse("depart", suggestion)}
                   placeholder="Rue, lieu, adresse..."
-                  rechercheDesactivee={texteDepart === TEXTE_POINT_CARTE}
+                  rechercheDesactivee={texteDepart === TEXTE_POINT_CARTE
+                    || texteDepart === adresseAutoDepart}
                 />
                 <AdresseSearch
                   label="Adresse d'arrivée"
@@ -288,46 +311,26 @@ export default function CarteTab({ actif }) {
                   onChange={changerTexteArrivee}
                   onChoisir={(suggestion) => choisirAdresse("arrivee", suggestion)}
                   placeholder="Rue, lieu, adresse..."
-                  rechercheDesactivee={texteArrivee === TEXTE_POINT_CARTE}
+                  rechercheDesactivee={texteArrivee === TEXTE_POINT_CARTE
+                    || texteArrivee === adresseAutoArrivee}
                 />
               </div>
               <HourSlider heure={heure} onChange={setHeure} />
               <div className="rang-boutons">
                 <button
                   type="button"
-                  className={modeItineraire ? "bouton bouton-plein" : "bouton"}
-                  aria-pressed={modeItineraire}
-                  onClick={basculerMode}
+                  className="bouton bouton-plein bouton-rechercher"
+                  disabled={!depart || !arrivee}
+                  onClick={() => {
+                    setMenuCarteOuvert(false);
+                    // zoom sur le départ pour voir directement par où partir
+                    // (nouvel objet à chaque clic : recentre même si inchangé)
+                    setPointRecentre({ lat: depart.lat, lng: depart.lng });
+                  }}
                 >
-                  Itinéraire
+                  Rechercher
                 </button>
-                {modeItineraire && (depart || route) && (
-                  <button type="button" className="bouton" onClick={effacer}>
-                    Effacer
-                  </button>
-                )}
               </div>
-              {modeItineraire && (
-                <div className="rang-boutons choix-points">
-                  <button
-                    type="button"
-                    className={pointAPlacer === "depart" ? "bouton bouton-plein" : "bouton"}
-                    aria-pressed={pointAPlacer === "depart"}
-                    onClick={() => setPointAPlacer("depart")}
-                  >
-                    Départ
-                  </button>
-                  <button
-                    type="button"
-                    className={pointAPlacer === "arrivee" ? "bouton bouton-plein" : "bouton"}
-                    aria-pressed={pointAPlacer === "arrivee"}
-                    disabled={!depart}
-                    onClick={() => setPointAPlacer("arrivee")}
-                  >
-                    Arrivée
-                  </button>
-                </div>
-              )}
               {indice && <p className="indice" role="status">{indice}</p>}
               {erreurHeatmap && <p className="texte-erreur" role="status">{erreurHeatmap}</p>}
               {erreurRoute && <p className="texte-erreur" role="status">{erreurRoute}</p>}

@@ -1,9 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { MapContainer, CircleMarker } from "react-leaflet";
 import { appelApi } from "../api";
 import { useProfil, poidsApi } from "../profil";
 import { ACCENT, CENTRE_DEMO, LIMITES_DEMO, ZOOM_DEMO } from "../config";
-import { CentrerSurPoint, ClicsCarte, FondDeCarte, LimiterDezoomCarte, RafraichirTaille } from "../carte-utils";
+import {
+  CentrerSurPoint,
+  ClicsCarte,
+  CoucheHeatmapAuto,
+  FondDeCarte,
+  LimiterDezoomCarte,
+  RafraichirTaille,
+} from "../carte-utils";
 import AdresseSearch from "../components/AdresseSearch";
 import Histogramme from "../components/Histogramme";
 import MessageCalme from "../components/MessageCalme";
@@ -14,8 +21,11 @@ export default function QuandTab({ actif }) {
   const { profil } = useProfil();
   const { poids_bruit, poids_foule } = poidsApi(profil);
 
+  const [heureActuelle] = useState(() => new Date().getHours());
   const [destination, setDestination] = useState(null);
   const [texteLieu, setTexteLieu] = useState("");
+  const [adresseAuto, setAdresseAuto] = useState("");
+  const compteurAdresse = useRef(0);
   const [pointRecentre, setPointRecentre] = useState(null);
   const [donnees, setDonnees] = useState(null);
   const [analyseEnCours, setAnalyseEnCours] = useState(false);
@@ -53,6 +63,20 @@ export default function QuandTab({ actif }) {
     setDestination(latlng);
     setTexteLieu(TEXTE_LIEU_CARTE);
     setErreur("");
+    // remplace le libellé neutre par l'adresse du lieu tapé
+    const numero = ++compteurAdresse.current;
+    appelApi("/api/adresse-inverse", {
+      lat: latlng.lat.toFixed(6),
+      lon: latlng.lng.toFixed(6),
+    })
+      .then((reponse) => {
+        if (!reponse.label || compteurAdresse.current !== numero) return;
+        setAdresseAuto(reponse.label);
+        setTexteLieu(reponse.label);
+      })
+      .catch(() => {
+        // adresse introuvable : le libellé neutre suffit
+      });
   }
 
   function changerTexteLieu(valeur) {
@@ -85,7 +109,7 @@ export default function QuandTab({ actif }) {
           onChange={changerTexteLieu}
           onChoisir={choisirLieu}
           placeholder="Rue, lieu, adresse..."
-          rechercheDesactivee={texteLieu === TEXTE_LIEU_CARTE}
+          rechercheDesactivee={texteLieu === TEXTE_LIEU_CARTE || texteLieu === adresseAuto}
         />
       </div>
 
@@ -102,6 +126,12 @@ export default function QuandTab({ actif }) {
           <FondDeCarte />
           <RafraichirTaille actif={actif} />
           <LimiterDezoomCarte actif={actif} limites={LIMITES_DEMO} />
+          <CoucheHeatmapAuto
+            actif={actif}
+            heure={heureActuelle}
+            poidsBruit={poids_bruit}
+            poidsFoule={poids_foule}
+          />
           <CentrerSurPoint point={pointRecentre} />
           <ClicsCarte onClic={choisirSurCarte} />
           {destination && (
