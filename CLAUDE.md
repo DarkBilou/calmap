@@ -56,9 +56,14 @@ invalides ou point hors zone. Le serveur ne crashe jamais.
    disponible (marqueur « tu es ici ») ; tap → `/api/quand` → histogramme 24 barres
    fait main (divs CSS, pas de lib de charts), créneau optimal surligné (même
    s'il est passé), heures passées grisées, valeurs exactes dans un `<details>`.
-3. **Mon profil** : curseurs Bruit (défaut 70) / Foule (défaut 50), bascule
-   « Journée difficile » (poids × 1,3 plafonnés à 1). **localStorage uniquement**
-   (`calmap.profil.v1`) — le profil alimente les onglets 1 et 2 via un contexte React.
+3. **Mon profil** : curseurs Bruit (défaut 70) / Foule (défaut 50) avec phrase
+   de niveau (4 paliers : ≤ 25/50/75/100) ; « Sons difficiles » (4 cases,
+   stockage local seulement, pas encore de scoring) ; « État du moment »
+   (Normal/Fatigué/Stressé/Surcharge proche → facteurs 1,0/1,15/1,25/1,4 sur
+   les poids, plafonnés à 1 ; `FACTEURS_ETAT` exporté pour moduler plus tard
+   le β d'itinéraire). **localStorage uniquement** (`calmap.profil.v1`,
+   migration douce des anciens profils `journeeDifficile` → « stressé ») —
+   le profil alimente les onglets 1 et 2 via un contexte React.
 
 Les 3 onglets restent montés (cartes Leaflet conservées) ; `invalidateSize()`
 à chaque réaffichage. PWA : manifest + `public/sw.js` (réseau d'abord, cache en

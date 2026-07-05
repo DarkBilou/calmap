@@ -1,7 +1,43 @@
-import { useProfil, sensibiliteEffective } from "../profil";
+import { useProfil } from "../profil";
 
-function Curseur({ id, libelle, valeur, journeeDifficile, onChange }) {
-  const effective = sensibiliteEffective(valeur, journeeDifficile);
+// Phrases de niveau : la valeur du curseur (pas la valeur ajustée par l'état
+// du moment) choisit la phrase — le texte reste stable quand l'état change.
+const PHRASES_BRUIT = [
+  "Les bruits de fond me gênent rarement.",
+  "Les lieux animés peuvent me fatiguer après un moment.",
+  "Je préfère éviter les rues très bruyantes.",
+  "Certains bruits peuvent vite devenir difficiles.",
+];
+
+const PHRASES_FOULE = [
+  "Les zones fréquentées ne me gênent pas vraiment.",
+  "La foule peut me fatiguer après un moment.",
+  "Je préfère éviter les zones denses ou les files d'attente.",
+  "Les lieux bondés peuvent vite devenir difficiles.",
+];
+
+function phraseNiveau(valeur, phrases) {
+  if (valeur <= 25) return phrases[0];
+  if (valeur <= 50) return phrases[1];
+  if (valeur <= 75) return phrases[2];
+  return phrases[3];
+}
+
+const SONS_DIFFICILES = [
+  { cle: "constants", titre: "Bruits constants", exemples: "circulation, ventilation, fond sonore continu" },
+  { cle: "soudains", titre: "Bruits soudains", exemples: "klaxons, sirènes, cris, travaux" },
+  { cle: "humains", titre: "Bruits humains", exemples: "conversations, enfants, groupes" },
+  { cle: "gravesAigus", titre: "Bruits graves ou aigus", exemples: "métro, freins, alarmes" },
+];
+
+const ETATS_DU_MOMENT = [
+  { cle: "normal", libelle: "Normal" },
+  { cle: "fatigue", libelle: "Fatigué" },
+  { cle: "stresse", libelle: "Stressé" },
+  { cle: "surcharge", libelle: "Surcharge proche" },
+];
+
+function Curseur({ id, libelle, valeur, phrases, onChange }) {
   return (
     <div className="carte-reglage">
       <div className="rang-libelle">
@@ -17,9 +53,7 @@ function Curseur({ id, libelle, valeur, journeeDifficile, onChange }) {
         value={valeur}
         onChange={(e) => onChange(Number(e.target.value))}
       />
-      {journeeDifficile && effective !== valeur && (
-        <p className="valeur-effective">Aujourd'hui : {effective} / 100</p>
-      )}
+      <p className="phrase-niveau">{phraseNiveau(valeur, phrases)}</p>
     </div>
   );
 }
@@ -27,42 +61,70 @@ function Curseur({ id, libelle, valeur, journeeDifficile, onChange }) {
 export default function ProfilTab() {
   const { profil, majProfil } = useProfil();
 
+  function majSon(cle, coche) {
+    majProfil("sonsDifficiles", { ...profil.sonsDifficiles, [cle]: coche });
+  }
+
   return (
     <div className="profil-onglet">
       <h1>Mon profil</h1>
-      <p className="consigne">Ces réglages ajustent la carte et les heures conseillées.</p>
+      <p className="consigne">Tes préférences sensorielles ajustent la carte et les heures conseillées.</p>
 
       <Curseur
         id="curseur-bruit"
         libelle="Sensibilité au bruit"
         valeur={profil.bruit}
-        journeeDifficile={profil.journeeDifficile}
+        phrases={PHRASES_BRUIT}
         onChange={(v) => majProfil("bruit", v)}
       />
       <Curseur
         id="curseur-foule"
         libelle="Sensibilité à la foule"
         valeur={profil.foule}
-        journeeDifficile={profil.journeeDifficile}
+        phrases={PHRASES_FOULE}
         onChange={(v) => majProfil("foule", v)}
       />
 
-      <div className="carte-reglage rang-bascule">
-        <div>
-          <label htmlFor="journee-difficile">Journée difficile</label>
-          <p className="description-bascule" id="journee-difficile-desc">
-            Sensibilité augmentée de 30&nbsp;% tant que c'est activé.
-          </p>
+      <fieldset className="carte-reglage groupe-profil">
+        <legend>Sons difficiles</legend>
+        <p className="description-groupe">
+          Coche ce qui te gêne le plus.
+        </p>
+        {SONS_DIFFICILES.map(({ cle, titre, exemples }) => (
+          <label key={cle} className="case-son">
+            <input
+              type="checkbox"
+              checked={profil.sonsDifficiles[cle]}
+              onChange={(e) => majSon(cle, e.target.checked)}
+            />
+            <span>
+              <strong>{titre}</strong>
+              <span className="exemples-son">{exemples}</span>
+            </span>
+          </label>
+        ))}
+      </fieldset>
+
+      <fieldset className="carte-reglage groupe-profil">
+        <legend>État du moment</legend>
+        <p className="description-groupe">
+          Ton besoin de calme augmente tant que c'est sélectionné.
+        </p>
+        <div className="choix-etat">
+          {ETATS_DU_MOMENT.map(({ cle, libelle }) => (
+            <label key={cle} className={profil.etat === cle ? "bouton-etat actif" : "bouton-etat"}>
+              <input
+                type="radio"
+                name="etat-du-moment"
+                value={cle}
+                checked={profil.etat === cle}
+                onChange={() => majProfil("etat", cle)}
+              />
+              {libelle}
+            </label>
+          ))}
         </div>
-        <input
-          id="journee-difficile"
-          type="checkbox"
-          role="switch"
-          checked={profil.journeeDifficile}
-          aria-describedby="journee-difficile-desc"
-          onChange={(e) => majProfil("journeeDifficile", e.target.checked)}
-        />
-      </div>
+      </fieldset>
 
       <p className="note-vie-privee">
         <strong>Ton profil reste sur ton téléphone.</strong>

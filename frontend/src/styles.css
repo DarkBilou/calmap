@@ -624,6 +624,97 @@ input[type="range"]::-moz-range-thumb {
   color: var(--accent-texte);
 }
 
+.phrase-niveau {
+  margin: 4px 0 0;
+  font-size: 16px;
+  color: var(--encre-2);
+}
+
+/* ——— Groupes du profil (sons difficiles, état du moment) ——— */
+
+.groupe-profil {
+  border: 1px solid var(--bord); /* fieldset : on garde le style carte */
+  min-width: 0;
+}
+
+.groupe-profil legend {
+  font-weight: 600;
+  padding: 0 4px;
+  margin-left: -4px;
+}
+
+.description-groupe {
+  margin: 2px 0 10px;
+  font-size: 16px;
+  color: var(--encre-2);
+}
+
+.case-son {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 4px;
+  cursor: pointer;
+}
+
+.case-son + .case-son {
+  border-top: 1px solid var(--bord);
+}
+
+.case-son input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  margin: 2px 0 0;
+  accent-color: var(--accent-texte);
+  cursor: pointer;
+}
+
+.exemples-son {
+  display: block;
+  font-size: 16px;
+  color: var(--encre-2);
+}
+
+.choix-etat {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.bouton-etat {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 52px;
+  padding: 8px 10px;
+  border: 1.5px solid #c9d2ce;
+  border-radius: 12px;
+  background: var(--surface);
+  font-weight: 600;
+  text-align: center;
+  cursor: pointer;
+}
+
+.bouton-etat input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.bouton-etat:focus-within {
+  outline: 3px solid var(--accent-texte);
+  outline-offset: 2px;
+}
+
+.bouton-etat.actif {
+  background: var(--accent-texte);
+  border-color: var(--accent-texte);
+  color: #ffffff;
+}
+
 .rang-bascule {
   display: flex;
   justify-content: space-between;
