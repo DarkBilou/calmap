@@ -134,6 +134,7 @@ export default function QuandTab({ actif }) {
           center={CENTRE_DEMO}
           zoom={ZOOM_DEMO}
           minZoom={11}
+          zoomSnap={0.25}
           maxBounds={LIMITES_DEMO}
           maxBoundsViscosity={1.0}
           zoomControl={false}

@@ -6,6 +6,7 @@ import { useProfil, poidsApi } from "../profil";
 import { couleurScore } from "../couleurs";
 import { ACCENT, CENTRE_DEMO, LIMITES_DEMO, ZOOM_DEMO } from "../config";
 import {
+  CadrerSurTrajet,
   CentrerSurPoint,
   ClicsCarte,
   CoucheGeoJson,
@@ -67,7 +68,6 @@ export default function CarteTab({ actif }) {
   const [bornesCarte, setBornesCarte] = useState(null);
 
   const [menuCarteOuvert, setMenuCarteOuvert] = useState(false);
-  const [pointAPlacer, setPointAPlacer] = useState("depart");
   const [depart, setDepart] = useState(null);
   const [arrivee, setArrivee] = useState(null);
   const [texteDepart, setTexteDepart] = useState("");
@@ -85,6 +85,7 @@ export default function CarteTab({ actif }) {
   const [calculEnCours, setCalculEnCours] = useState(false);
   const [erreurRoute, setErreurRoute] = useState("");
   const [relanceRoute, setRelanceRoute] = useState(0);
+  const [demandeCadrage, setDemandeCadrage] = useState(0);
   // Itinéraire lancé ("calme" | "rapide" | null) : seul son tracé reste
   // affiché, la fiche passe en mode suivi avec le bouton Quitter.
   const [itineraireLance, setItineraireLance] = useState(null);
@@ -161,7 +162,8 @@ export default function CarteTab({ actif }) {
     setErreurRoute("");
     if (!route) setRelanceRoute((n) => n + 1);
     setMenuCarteOuvert(false);
-    setPointRecentre({ lat: depart.lat, lng: depart.lng });
+    // recadre sur le trajet entier (utile si l'utilisateur a bougé la carte)
+    setDemandeCadrage((n) => n + 1);
   }
 
   function lancerItineraire(type) {
@@ -178,7 +180,6 @@ export default function CarteTab({ actif }) {
     setDepartEstPosition(true);
     setRoute(null);
     setErreurRoute("");
-    setPointAPlacer("arrivee");
     setPointRecentre({ lat: maPosition.lat, lng: maPosition.lng });
   }
 
@@ -190,18 +191,22 @@ export default function CarteTab({ actif }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statutPosition]);
 
+  // Efface le trajet ; le départ revient à ta position si elle est connue
+  // (sinon il faudrait re-saisir une adresse à chaque fois).
   function effacer() {
-    setDepart(null);
+    const position = statutPosition === "ok" && maPosition
+      ? { lat: maPosition.lat, lng: maPosition.lng }
+      : null;
+    setDepart(position);
     setArrivee(null);
-    setTexteDepart("");
+    setTexteDepart(position ? TEXTE_MA_POSITION : "");
     setTexteArrivee("");
-    setDepartEstPosition(false);
+    setDepartEstPosition(Boolean(position));
     setAdresseAutoDepart("");
     setAdresseAutoArrivee("");
     setPointRecentre(null);
     setRoute(null);
     setErreurRoute("");
-    setPointAPlacer("depart");
   }
 
   // Remplace « Point choisi sur la carte » par l'adresse du lieu tapé, dès
@@ -228,23 +233,14 @@ export default function CarteTab({ actif }) {
       });
   }
 
+  // Un tap sur la carte règle TOUJOURS l'arrivée : le départ est ta position
+  // (ou une adresse saisie dans la recherche), jamais un point posé sur la carte.
   function clicCarte(latlng) {
     setErreurRoute("");
-    if (pointAPlacer === "depart" || !depart) {
-      setDepart(latlng);
-      setDepartEstPosition(false);
-      setTexteDepart(TEXTE_POINT_CARTE);
-      setRoute(null);
-      setPointAPlacer("arrivee");
-      remplirAdresse("depart", latlng);
-    } else {
-      setArrivee(latlng);
-      setTexteArrivee(TEXTE_POINT_CARTE);
-      setRoute(null);
-      // départ = ta position : les taps suivants continuent d'ajuster l'arrivée
-      setPointAPlacer(departEstPosition ? "arrivee" : "depart");
-      remplirAdresse("arrivee", latlng);
-    }
+    setArrivee(latlng);
+    setTexteArrivee(TEXTE_POINT_CARTE);
+    setRoute(null);
+    remplirAdresse("arrivee", latlng);
   }
 
   function changerTexteDepart(valeur) {
@@ -254,7 +250,6 @@ export default function CarteTab({ actif }) {
       setDepart(null);
       setRoute(null);
       setErreurRoute("");
-      setPointAPlacer("depart");
     }
   }
 
@@ -264,7 +259,6 @@ export default function CarteTab({ actif }) {
       setArrivee(null);
       setRoute(null);
       setErreurRoute("");
-      if (depart) setPointAPlacer("arrivee");
     }
   }
 
@@ -277,18 +271,17 @@ export default function CarteTab({ actif }) {
       setDepart(point);
       setDepartEstPosition(false);
       setTexteDepart(suggestion.label);
-      setPointAPlacer("arrivee");
     } else {
       setArrivee(point);
       setTexteArrivee(suggestion.label);
-      setPointAPlacer("depart");
     }
   }
 
   let indice = "";
-  if (pointAPlacer === "depart") indice = depart ? "Touche la carte pour déplacer le départ." : "Touche la carte : point de départ.";
+  if (!depart) indice = "Le départ suit ta position. Sinon, saisis une adresse de départ.";
   else if (!arrivee) indice = "Touche la carte : point d'arrivée.";
   else if (calculEnCours) indice = "Calcul de l'itinéraire…";
+  else indice = "Touche la carte pour déplacer l'arrivée.";
 
   let resumeMenu = "Recherche et itinéraire";
   if (calculEnCours) resumeMenu = "Calcul en cours";
@@ -314,6 +307,7 @@ export default function CarteTab({ actif }) {
           center={CENTRE_DEMO}
           zoom={ZOOM_DEMO}
           minZoom={11}
+          zoomSnap={0.25}
           maxBounds={LIMITES_DEMO}
           maxBoundsViscosity={1.0}
           zoomControl={false}
@@ -325,6 +319,8 @@ export default function CarteTab({ actif }) {
           <LimiterDezoomCarte actif={actif} limites={LIMITES_DEMO} />
           <SuivreBornesCarte actif={heatmapActive} onChange={setBornesCarte} />
           <CentrerSurPoint point={pointRecentre} />
+          {/* Trajet calculé, pas encore lancé : vue cadrée sur son intégralité */}
+          <CadrerSurTrajet route={route} actif={actif && !itineraireLance} demande={demandeCadrage} />
           <ClicsCarte onClic={clicCarte} />
           {/* Pendant un itinéraire lancé, la heatmap s'efface : seul le trajet
               à suivre reste lisible. Elle revient en quittant l'itinéraire. */}
@@ -415,7 +411,7 @@ export default function CarteTab({ actif }) {
                 </div>
                 {statutPosition === "hors-zone" && (
                   <p className="texte-discret" role="status">
-                    Tu es en dehors de la zone de démo (Paris + Issy) : choisis le départ sur la carte.
+                    Tu es en dehors de la zone de démo (Paris + Issy) : saisis une adresse de départ.
                   </p>
                 )}
                 {indice && <p className="indice" role="status">{indice}</p>}
@@ -435,7 +431,14 @@ export default function CarteTab({ actif }) {
           <section className="feuille" aria-label="Comparaison des itinéraires">
             <div className="feuille-titre">
               <h2>Itinéraire calme</h2>
-              <span className="badge">{libelleConfiance(route.confiance)}</span>
+              <button
+                type="button"
+                className="bouton-croix"
+                aria-label="Effacer l'itinéraire"
+                onClick={effacer}
+              >
+                ×
+              </button>
             </div>
             <p className="feuille-deltas">
               {texteDeltaDuree(route.calme.delta_duree_min)}
@@ -466,11 +469,6 @@ export default function CarteTab({ actif }) {
                 onClick={() => lancerItineraire("rapide")}
               >
                 Lancer le rapide
-              </button>
-            </div>
-            <div className="rang-boutons">
-              <button type="button" className="bouton" onClick={effacer}>
-                Effacer
               </button>
             </div>
           </section>

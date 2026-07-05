@@ -27,10 +27,13 @@ export function RafraichirTaille({ actif }) {
 }
 
 function appliquerLimiteDezoom(map, limites) {
-  const bounds = L.latLngBounds(limites);
-  // Le dézoom s'arrête quand la vue complète reste dans la zone de démo :
-  // on ne doit pas voir au-delà de la zone couverte par les données.
-  const minZoom = map.getBoundsZoom(bounds, true);
+  // Marge de 35 % autour de la zone : sans elle, le centre serait verrouillé
+  // dès que la fenêtre dépasse la zone, et le cadrage d'un itinéraire au-dessus
+  // de la fiche comparative deviendrait impossible sur téléphone.
+  const bounds = L.latLngBounds(limites).pad(0.35);
+  // Le dézoom s'arrête quand la zone de démo entière est visible : on peut
+  // ainsi voir tout Paris d'un coup, sans dériver loin au-delà de la zone.
+  const minZoom = map.getBoundsZoom(bounds, false);
   if (Number.isFinite(minZoom)) {
     map.setMinZoom(minZoom);
     if (map.getZoom() < minZoom) map.setZoom(minZoom, { animate: false });
@@ -246,6 +249,48 @@ export function CoucheHeatmapAuto({ actif, heure, poidsBruit, poidsFoule }) {
         : <CoucheGeoJson donnees={donnees} style={styleRuesHeatmap} />}
     </>
   );
+}
+
+/** Cadre la carte pour montrer les tracés rapide + calme en intégralité,
+    dans la zone réellement libre entre la barre d'outils et la fiche
+    comparative : leurs hauteurs sont mesurées dans le DOM (elles varient
+    selon les textes et la largeur d'écran). Sans animation (design). */
+export function CadrerSurTrajet({ route, actif, demande = 0 }) {
+  const map = useMap();
+  useEffect(() => {
+    if (!actif || !route) return;
+    const points = [
+      ...route.rapide.geojson.geometry.coordinates,
+      ...route.calme.geojson.geometry.coordinates,
+    ].map(([lon, lat]) => [lat, lon]);
+    if (points.length === 0) return;
+    map.invalidateSize();
+
+    const cadre = map.getContainer().getBoundingClientRect();
+    const parent = map.getContainer().parentElement; // .zone-carte (overlays)
+    const barre = parent.querySelector(".outils-carte");
+    const feuille = parent.querySelector(".feuille");
+    const marge = 24;
+    let haut = barre
+      ? barre.getBoundingClientRect().bottom - cadre.top + marge
+      : 90;
+    let bas = feuille
+      ? cadre.bottom - feuille.getBoundingClientRect().top + marge
+      : 330;
+    // Petit écran : on garantit au moins 150 px de carte visible, quitte à
+    // laisser le bas du trajet passer sous la fiche.
+    const visibleMin = 150;
+    if (cadre.height - haut - bas < visibleMin) {
+      bas = Math.max(marge, cadre.height - haut - visibleMin);
+    }
+
+    map.fitBounds(L.latLngBounds(points), {
+      paddingTopLeft: L.point(36, haut),
+      paddingBottomRight: L.point(36, bas),
+      animate: false,
+    });
+  }, [map, route, actif, demande]);
+  return null;
 }
 
 /** Remonte les taps sur la carte (latlng Leaflet). */
