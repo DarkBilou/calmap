@@ -23,13 +23,6 @@ function phraseNiveau(valeur, phrases) {
   return phrases[3];
 }
 
-const SONS_DIFFICILES = [
-  { cle: "constants", titre: "Bruits constants", exemples: "circulation, ventilation, fond sonore continu" },
-  { cle: "soudains", titre: "Bruits soudains", exemples: "klaxons, sirènes, cris, travaux" },
-  { cle: "humains", titre: "Bruits humains", exemples: "conversations, enfants, groupes" },
-  { cle: "gravesAigus", titre: "Bruits graves ou aigus", exemples: "métro, freins, alarmes" },
-];
-
 const ETATS_DU_MOMENT = [
   { cle: "normal", libelle: "Normal" },
   { cle: "fatigue", libelle: "Fatigué" },
@@ -37,11 +30,27 @@ const ETATS_DU_MOMENT = [
   { cle: "surcharge", libelle: "Surcharge proche" },
 ];
 
-function Curseur({ id, libelle, valeur, phrases, onChange }) {
+const ICONES_PROFIL = {
+  profil: "/profile-icons/account.png",
+  bruit: "/profile-icons/marketing.png",
+  foule: "/profile-icons/multiple-users-silhouette.png",
+  heureux: "/profile-icons/happy-face.png",
+  neutre: "/profile-icons/neutral-face.png",
+  triste: "/profile-icons/sad-face.png",
+};
+
+function IconeProfil({ src, alt }) {
+  return <img className="icone-profil" src={src} alt={alt} aria-hidden={alt ? undefined : "true"} />;
+}
+
+function Curseur({ id, libelle, valeur, phrases, icone, onChange }) {
   return (
     <div className="carte-reglage">
       <div className="rang-libelle">
-        <label htmlFor={id}>{libelle}</label>
+        <label className="libelle-avec-icone" htmlFor={id}>
+          <IconeProfil src={icone} alt="" />
+          <span>{libelle}</span>
+        </label>
         <output htmlFor={id}>{valeur} / 100</output>
       </div>
       <input
@@ -61,13 +70,12 @@ function Curseur({ id, libelle, valeur, phrases, onChange }) {
 export default function ProfilTab() {
   const { profil, majProfil } = useProfil();
 
-  function majSon(cle, coche) {
-    majProfil("sonsDifficiles", { ...profil.sonsDifficiles, [cle]: coche });
-  }
-
   return (
     <div className="profil-onglet">
-      <h1>Mon profil</h1>
+      <h1 className="titre-avec-icone">
+        <IconeProfil src={ICONES_PROFIL.profil} alt="" />
+        <span>Mon profil</span>
+      </h1>
       <p className="consigne">Tes préférences sensorielles ajustent la carte et les heures conseillées.</p>
 
       <Curseur
@@ -75,6 +83,7 @@ export default function ProfilTab() {
         libelle="Sensibilité au bruit"
         valeur={profil.bruit}
         phrases={PHRASES_BRUIT}
+        icone={ICONES_PROFIL.bruit}
         onChange={(v) => majProfil("bruit", v)}
       />
       <Curseur
@@ -82,35 +91,23 @@ export default function ProfilTab() {
         libelle="Sensibilité à la foule"
         valeur={profil.foule}
         phrases={PHRASES_FOULE}
+        icone={ICONES_PROFIL.foule}
         onChange={(v) => majProfil("foule", v)}
       />
 
-      <fieldset className="carte-reglage groupe-profil">
-        <legend>Sons difficiles</legend>
-        <p className="description-groupe">
-          Coche ce qui te gêne le plus.
-        </p>
-        {SONS_DIFFICILES.map(({ cle, titre, exemples }) => (
-          <label key={cle} className="case-son">
-            <input
-              type="checkbox"
-              checked={profil.sonsDifficiles[cle]}
-              onChange={(e) => majSon(cle, e.target.checked)}
-            />
-            <span>
-              <strong>{titre}</strong>
-              <span className="exemples-son">{exemples}</span>
-            </span>
-          </label>
-        ))}
-      </fieldset>
-
-      <fieldset className="carte-reglage groupe-profil">
-        <legend>État du moment</legend>
+      <section className="carte-reglage groupe-profil" aria-labelledby="titre-etat-moment">
+        <h2 id="titre-etat-moment" className="titre-groupe-profil">
+          <span>État du moment</span>
+          <span className="icones-etat" aria-hidden="true">
+            <IconeProfil src={ICONES_PROFIL.heureux} alt="" />
+            <IconeProfil src={ICONES_PROFIL.neutre} alt="" />
+            <IconeProfil src={ICONES_PROFIL.triste} alt="" />
+          </span>
+        </h2>
         <p className="description-groupe">
           Ton besoin de calme augmente tant que c'est sélectionné.
         </p>
-        <div className="choix-etat">
+        <div className="choix-etat" role="radiogroup" aria-labelledby="titre-etat-moment">
           {ETATS_DU_MOMENT.map(({ cle, libelle }) => (
             <label key={cle} className={profil.etat === cle ? "bouton-etat actif" : "bouton-etat"}>
               <input
@@ -124,7 +121,7 @@ export default function ProfilTab() {
             </label>
           ))}
         </div>
-      </fieldset>
+      </section>
 
       <p className="note-vie-privee">
         <strong>Ton profil reste sur ton téléphone.</strong>

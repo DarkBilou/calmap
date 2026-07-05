@@ -28,9 +28,9 @@ export function RafraichirTaille({ actif }) {
 
 function appliquerLimiteDezoom(map, limites) {
   const bounds = L.latLngBounds(limites);
-  // Le dézoom s'arrête quand la zone de démo tient en entier dans la vue
-  // (inside=false) : on peut voir tout Paris, mais pas le reste du monde.
-  const minZoom = map.getBoundsZoom(bounds, false);
+  // Le dézoom s'arrête quand la vue complète reste dans la zone de démo :
+  // on ne doit pas voir au-delà de la zone couverte par les données.
+  const minZoom = map.getBoundsZoom(bounds, true);
   if (Number.isFinite(minZoom)) {
     map.setMinZoom(minZoom);
     if (map.getZoom() < minZoom) map.setZoom(minZoom, { animate: false });

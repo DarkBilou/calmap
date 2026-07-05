@@ -14,6 +14,7 @@ import {
 } from "../carte-utils";
 import AdresseSearch from "../components/AdresseSearch";
 import Histogramme from "../components/Histogramme";
+import HourSlider from "../components/HourSlider";
 import MessageCalme from "../components/MessageCalme";
 
 const TEXTE_LIEU_CARTE = "Lieu choisi sur la carte";
@@ -24,6 +25,7 @@ export default function QuandTab({ actif }) {
   const { statut: statutPosition, position: maPosition } = useGeolocalisation();
 
   const [heureActuelle] = useState(() => new Date().getHours());
+  const [heureCarte, setHeureCarte] = useState(heureActuelle);
   const [destination, setDestination] = useState(null);
   const [texteLieu, setTexteLieu] = useState("");
   const [adresseAuto, setAdresseAuto] = useState("");
@@ -123,6 +125,10 @@ export default function QuandTab({ actif }) {
         />
       </div>
 
+      <div className="curseur-quand">
+        <HourSlider heure={heureCarte} onChange={setHeureCarte} label="Heure affichée" />
+      </div>
+
       <div className="mini-carte">
         <MapContainer
           center={CENTRE_DEMO}
@@ -138,7 +144,7 @@ export default function QuandTab({ actif }) {
           <LimiterDezoomCarte actif={actif} limites={LIMITES_DEMO} />
           <CoucheHeatmapAuto
             actif={actif}
-            heure={heureActuelle}
+            heure={heureCarte}
             poidsBruit={poids_bruit}
             poidsFoule={poids_foule}
           />

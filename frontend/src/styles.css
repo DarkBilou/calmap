@@ -14,6 +14,7 @@
   --accent-texte: #1d7a6e; /* accent pour texte et focus — 5,0:1 sur fond */
   --bord: #e3e8e5;
   --erreur-texte: #8a3b26; /* terre cuite sombre, posé — 7:1 sur blanc */
+  --icone-profil-taille: 24px;
 }
 
 * {
@@ -491,6 +492,30 @@ input[type="range"]::-moz-range-thumb {
   padding: 16px 16px 24px;
 }
 
+.titre-avec-icone,
+.libelle-avec-icone,
+.titre-groupe-profil,
+.icones-etat {
+  display: flex;
+  align-items: center;
+}
+
+.titre-avec-icone,
+.libelle-avec-icone {
+  gap: 10px;
+}
+
+.titre-avec-icone {
+  min-height: var(--icone-profil-taille);
+}
+
+.icone-profil {
+  flex: 0 0 var(--icone-profil-taille);
+  width: var(--icone-profil-taille);
+  height: var(--icone-profil-taille);
+  object-fit: contain;
+}
+
 .consigne {
   margin: 0 0 12px;
   color: var(--encre-2);
@@ -498,6 +523,10 @@ input[type="range"]::-moz-range-thumb {
 
 .recherche-quand {
   margin-bottom: 12px;
+}
+
+.curseur-quand {
+  margin: 0 0 12px;
 }
 
 .mini-carte {
@@ -613,15 +642,21 @@ input[type="range"]::-moz-range-thumb {
 .rang-libelle {
   display: flex;
   justify-content: space-between;
-  align-items: baseline;
-  gap: 8px;
+  align-items: center;
+  gap: 12px;
 }
 
 .rang-libelle label {
+  min-width: 0;
   font-weight: 600;
 }
 
+.rang-libelle label span {
+  line-height: 1.2;
+}
+
 .rang-libelle output {
+  flex-shrink: 0;
   color: var(--encre-2);
   font-variant-numeric: tabular-nums;
 }
@@ -641,15 +676,20 @@ input[type="range"]::-moz-range-thumb {
 
 /* ——— Groupes du profil (sons difficiles, état du moment) ——— */
 
-.groupe-profil {
-  border: 1px solid var(--bord); /* fieldset : on garde le style carte */
-  min-width: 0;
+.titre-groupe-profil {
+  margin: 0 0 12px;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 17px;
+  font-weight: 700;
 }
 
-.groupe-profil legend {
-  font-weight: 600;
-  padding: 0 4px;
-  margin-left: -4px;
+.icones-etat {
+  gap: 4px;
+}
+
+.icones-etat .icone-profil {
+  border-radius: 50%;
 }
 
 .description-groupe {
